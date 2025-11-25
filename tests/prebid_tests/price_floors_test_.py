@@ -1,3 +1,5 @@
+# tests/prebid_tests/price_floors_test.py
+
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
 
@@ -53,6 +55,9 @@ class PriceFloorsTest(BaseTest):
                         provider: null,
                         rules_count: 0,
                         raw_config: {},
+                        installed_modules: null,
+                        has_pbjs: false,
+                        has_getConfig: false,
                         errors: []
                     };
 
@@ -63,20 +68,26 @@ class PriceFloorsTest(BaseTest):
                             return out;
                         }
 
-                        // Check module presence
+                        out.has_pbjs = true;
+
+                        // 1) installedModules – presence of priceFloors module
                         if (Array.isArray(pbjs.installedModules)) {
+                            out.installed_modules = pbjs.installedModules.slice();
                             out.module_present = pbjs.installedModules.includes("priceFloors");
                         }
 
+                        // 2) Need getConfig to inspect floors config
                         if (typeof pbjs.getConfig !== "function") {
                             out.errors.push("pbjs.getConfig is not available");
                             return out;
                         }
 
-                        // Get floors config via getConfig
+                        out.has_getConfig = true;
+
                         let floorsCfg = pbjs.getConfig("floors");
+
+                        // Some versions nest it under the full config
                         if (!floorsCfg || (typeof floorsCfg === "object" && Object.keys(floorsCfg).length === 0)) {
-                            // Some versions return nested under main config
                             const fullCfg = pbjs.getConfig() || {};
                             if (fullCfg.floors) {
                                 floorsCfg = fullCfg.floors;
@@ -84,32 +95,47 @@ class PriceFloorsTest(BaseTest):
                         }
 
                         if (!floorsCfg) {
+                            // No floors config at all – but module_present might still be true
                             out.raw_config = {};
                             return out;
                         }
 
                         out.raw_config = floorsCfg;
-                        out.enabled = !!floorsCfg.enabled;
-                        out.provider = floorsCfg.data && floorsCfg.data.provider
-                            ? floorsCfg.data.provider
-                            : (floorsCfg.provider || null);
 
-                        // Try to derive rule count from various shapes
+                        // Enabled flag:
+                        //  - if floorsCfg.enabled is explicitly set, honour it
+                        //  - if it's missing but we have config, default to TRUE
+                        if (Object.prototype.hasOwnProperty.call(floorsCfg, "enabled")) {
+                            out.enabled = !!floorsCfg.enabled;
+                        } else {
+                            out.enabled = true;
+                        }
+
+                        // Provider (optional)
+                        if (floorsCfg.data && floorsCfg.data.provider) {
+                            out.provider = floorsCfg.data.provider;
+                        } else if (floorsCfg.provider) {
+                            out.provider = floorsCfg.provider;
+                        }
+
+                        // Rule count from data.values / values
                         let rulesCount = 0;
-
-                        // Most common shape: floors.data.values
                         const valuesObj =
-                            (floorsCfg.data && floorsCfg.data.values)
-                            || floorsCfg.values
-                            || null;
+                            (floorsCfg.data && floorsCfg.data.values) ||
+                            floorsCfg.values ||
+                            null;
 
                         if (valuesObj && typeof valuesObj === "object") {
                             rulesCount = Object.keys(valuesObj).length;
                         }
 
-                        // Some configs may have schema-based rules or additional schemas;
-                        // we keep it simple and only count values keys for now.
                         out.rules_count = rulesCount;
+
+                        // 3) Fallback: if we somehow didn't see the module in installedModules
+                        // but there *is* a floors config, treat module_present as true.
+                        if (!out.module_present && floorsCfg) {
+                            out.module_present = true;
+                        }
 
                     } catch (e) {
                         out.errors.push(String(e));
@@ -147,21 +173,29 @@ class PriceFloorsTest(BaseTest):
         enabled = floors.get("enabled", False)
         rules_count = floors.get("rules_count", 0)
         provider = floors.get("provider")
+        raw_cfg = floors.get("raw_config") or {}
+        has_config = bool(raw_cfg)
 
         # 1) Module presence
-        if not module_present:
-            errors.append("Price floors module (priceFloors) not installed")
+        if not module_present and not has_config:
+            errors.append("Price floors module (priceFloors) not installed and no floors config present")
+
+        if not module_present and has_config:
+            # Config exists but module isn't listed – warn, don’t hard-fail.
+            warnings.append("Price floors config present but priceFloors module not listed in pbjs.installedModules")
 
         # 2) Enabled flag
-        if module_present and not enabled:
-            errors.append("Price floors not enabled in Prebid config")
+        # After the execute() change, 'enabled' will be True whenever there is
+        # a floors config and no explicit enabled:false.
+        if has_config and not enabled:
+            errors.append("Price floors config present but disabled in Prebid (floors.enabled === false)")
 
         # 3) Rules
-        if module_present and enabled and rules_count == 0:
-            errors.append("No floor rules configured (floors.values is empty or missing)")
+        if has_config and enabled and rules_count == 0:
+            errors.append("No floor rules configured (floors.data.values / floors.values is empty or missing)")
 
-        # 4) Provider is optional, but nice to have – warn if missing
-        if module_present and enabled and not provider:
+        # 4) Provider is optional – warn if missing
+        if has_config and enabled and not provider:
             warnings.append("Price floors provider not specified in config")
 
         # Final state
