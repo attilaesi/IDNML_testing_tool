@@ -27,10 +27,12 @@ class IdentityModulesTest(BaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        # 1) Detect geo (from cookies) and load expected modules
-        fallback_geo = self.config.get("geo_mode", "UK")
-        geo = await detect_geo_from_cookies(page, fallback=fallback_geo)
-        result.metadata["geo"] = geo
+        # 1) Detect geo from Locale cookie (injected by framework_manager)
+        # self.locale is set per URL, based on the 'Locale' cookie.
+        locale = getattr(self, "locale", "UK")
+        geo = locale  # keep using the same variable name if the rest of the test expects 'geo'
+        result.metadata["locale"] = locale
+        result.metadata["geo"] = geo  # backwards-compatible metadata key
 
         geo_cfg = get_geo_config(geo)
         expected_ids = set(geo_cfg.get("identity_modules", []))

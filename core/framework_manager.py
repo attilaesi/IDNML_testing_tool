@@ -112,6 +112,41 @@ class TestFramework:
         except Exception as e:
             print(f"⚠️ Failed to set context cookies: {e}")
 
+    # ------------- Locale detection -------------
+
+    async def _detect_locale(self, page) -> str:
+        """
+        Detect geo from the 'Locale' cookie.
+
+        Expected values: "UK", "US" (case-insensitive).
+        Falls back to "UK" if missing/unknown.
+        """
+        js = """
+        () => {
+          try {
+            const cookies = document.cookie ? document.cookie.split(/;\\s*/) : [];
+            for (const c of cookies) {
+              const [name, ...rest] = c.split("=");
+              if (!name) continue;
+              if (name.trim() === "Locale") {
+                const val = (rest.join("=") || "").trim();
+                return val || null;
+              }
+            }
+            return null;
+          } catch (e) {
+            return null;
+          }
+        }
+        """
+        val = await page.evaluate(js)
+        if not val:
+            return "UK"
+        val = str(val).strip().upper()
+        if val not in ("UK", "US"):
+            return "UK"
+        return val        
+
     # ------------- PageType detection -------------
 
     async def _detect_page_type(self, page) -> str:
@@ -281,6 +316,10 @@ class TestFramework:
         page_type_norm = await self._detect_page_type(page)
         print(f"🧩 Detected page type: {page_type_norm}")
 
+        # Detect locale from Locale cookie (UK / US)
+        locale = await self._detect_locale(page)
+        print(f"🗺️  Detected locale: {locale}")
+
         # 🔸 Apply site test plan (inherit-all, then exclude by page type)
         site_id = str(self.config.get("active_site", "independent")).lower()
         site_plan = SITE_TEST_PLANS.get(site_id, {})
@@ -308,18 +347,24 @@ class TestFramework:
 
         # Run each test for this URL
         for test in run_list:
+            # Expose locale on the test instance so tests can read self.locale
+            try:
+                setattr(test, "locale", locale)
+            except Exception:
+                pass
+
             try:
                 result = await test.run(page, url)
 
-                # Attach page_type into metadata so tests/reporting can use it later
+                # Attach page_type and locale into metadata so tests/reporting can use it later
                 try:
                     if hasattr(result, "metadata"):
                         if result.metadata is None:
                             result.metadata = {}
                         if isinstance(result.metadata, dict):
                             result.metadata.setdefault("page_type", page_type_norm)
+                            result.metadata.setdefault("locale", locale)
                 except Exception:
-                    # metadata is best-effort, don't break test on this
                     pass
 
                 url_results.append(result)

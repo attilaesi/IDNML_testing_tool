@@ -29,7 +29,6 @@ class TestConfig:
             # Playwright default timeout (ms)
             "timeout": 30000,
             # Viewport – keep in sync with mobile flag for now
-            #"viewport": {"width": 1920, "height": 1080}
             "viewport": {"width": 390, "height": 844},
         }
 
@@ -48,13 +47,8 @@ class TestConfig:
             "prebid_ready_timeout": 10.0,  # seconds to wait for pbjs + GPT
             "page_type_timeout": 3.0,      # seconds to poll for pageType
 
-            # Fallback geo if cookie-based detection fails
-            # Used by some Prebid tests (e.g. bidder expectations)
-            "geo_mode": "UK",
-
-            # 🔸 NEW: global trace switch for extra console logging in tests
-            # Set to True when you want verbose per-test diagnostics.
-            "trace": False,
+            # 🔸 Global trace switch for extra console logging in tests
+            "trace": True,
         }
 
         # Output configuration
