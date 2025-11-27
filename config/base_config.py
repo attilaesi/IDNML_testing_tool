@@ -48,15 +48,15 @@ class TestConfig:
             "page_type_timeout": 3.0,      # seconds to poll for pageType
 
             # 🔸 Global trace switch for extra console logging in tests
-            "trace": True,
+            "trace": False,
         }
 
         # Output configuration
         self.output_config = {
-            "output_file": "output.csv",
-            "output_pagetype_file": "output_by_pagetype.csv",
-            "cmp_debug_dir": "cmp_debug",
-        }
+        "output_file": "output/output.csv",
+        "output_pagetype_file": "output/output_by_pagetype.csv",
+        "cmp_debug_dir": "output/cmp_debug",
+}
 
         # 🔹 UAT-specific feature flag cookies
         # These are only applied when uat_mode=True; the domain is patched

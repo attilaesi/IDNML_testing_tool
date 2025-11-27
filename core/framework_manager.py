@@ -6,6 +6,7 @@ import csv
 import asyncio
 import inspect
 import sys
+import os
 from pathlib import Path
 from typing import List, Dict, Type, Optional
 from urllib.parse import urlparse, urlunparse
@@ -145,7 +146,7 @@ class TestFramework:
         val = str(val).strip().upper()
         if val not in ("UK", "US"):
             return "UK"
-        return val        
+        return val
 
     # ------------- PageType detection -------------
 
@@ -283,6 +284,7 @@ class TestFramework:
         return urls
 
     # ------------- Per-URL runner -------------
+
     async def _run_tests_for_url(
         self,
         page,
@@ -375,6 +377,7 @@ class TestFramework:
         left = total_urls - url_idx
         print(f"[{url_idx}/{total_urls}] done, {left} left")
         return url_results
+
     # ------------- Main runner -------------
 
     async def run_tests(
@@ -483,7 +486,13 @@ class TestFramework:
         if not results:
             return
 
-        output_file = self.config.get("output_file", "output.csv")
+        # Use configured path, defaulting inside output/
+        output_file = self.config.get("output_file", "output/output.csv")
+        output_path = Path(output_file)
+
+        # Ensure parent directory exists
+        if output_path.parent:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Unique URLs (columns)
         urls: List[str] = []
@@ -524,7 +533,7 @@ class TestFramework:
 
         cols = ["TestName"] + header_labels
 
-        with open(output_file, "w", newline="", encoding="utf-8") as f:
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=cols)
             writer.writeheader()
 
@@ -543,15 +552,21 @@ class TestFramework:
                         row[col_name] = status
                 writer.writerow(row)
 
-        print(f"📄 Results written to: {output_file}")
+        print(f"📄 Results written to: {output_path}")
 
     async def _write_pagetype_summary(self, results: List[TestResult]):
         if not results:
             return
 
+        # Use configured path, defaulting inside output/
         output_file = self.config.get(
-            "output_pagetype_file", "output_by_pagetype.csv"
+            "output_pagetype_file", "output/output_by_pagetype.csv"
         )
+        output_path = Path(output_file)
+
+        # Ensure parent directory exists
+        if output_path.parent:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
         page_types: List[str] = []
         pt_urls: Dict[str, set[str]] = {}
@@ -617,7 +632,7 @@ class TestFramework:
 
         cols = ["TestName"] + page_types
 
-        with open(output_file, "w", newline="", encoding="utf-8") as f:
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=cols)
             writer.writeheader()
 
@@ -637,4 +652,4 @@ class TestFramework:
                 joined = "; ".join(urls_for_pt)
                 writer.writerow({"TestName": f"{pt}: {joined}"})
 
-        print(f"📄 Page-type summary written to: {output_file}")
+        print(f"📄 Page-type summary written to: {output_path}")
