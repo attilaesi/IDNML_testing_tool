@@ -19,6 +19,7 @@ from core.data_extractor import DataExtractor  # noqa: F401 (used by tests)
 
 from config.site_test_plans import SITE_TEST_PLANS
 
+
 class TestFramework:
     def __init__(self, config: Dict):
         self.config = config
@@ -26,6 +27,9 @@ class TestFramework:
         self.test_categories: Dict[str, List[str]] = {}
         self.browser_manager = BrowserManager(config)
         self.cmp_handler = CMPHandler(config)
+
+        # Hold onto a warmup page so we can reuse it for tests
+        self._warm_page = None
 
     # ------------- URL helpers -------------
 
@@ -183,6 +187,144 @@ class TestFramework:
             elapsed += interval
 
         return "unknown"
+
+
+    async def _wait_for_gpt_slot_responses(self, page, log_fn) -> None:
+        """
+        Wait until GPT fires 'slotResponseReceived'.
+        Logs ONLY the slot names (last path segment).
+        """
+        timeout = float(self.config.get("gpt_slot_timeout", 7.0))
+        interval = 0.25
+        elapsed = 0.0
+
+        # Helper to extract slot name from full path
+        extract_js = """
+        (path) => {
+            try {
+                if (!path) return "unknown";
+                const parts = path.split("/");
+                return parts[parts.length - 1] || "unknown";
+            } catch (e) {
+                return "unknown";
+            }
+        }
+        """
+
+        # Init listener + capture any initial slots
+        init_js = f"""
+        () => {{
+            try {{
+                if (!window.googletag || !googletag.pubads) {{
+                    return {{ ok: false, reason: "googletag/pubads missing" }};
+                }}
+                const pubads = googletag.pubads();
+
+                if (!window.__idnmlSlotResponses) {{
+                    window.__idnmlSlotResponses = [];
+
+                    // Capture any already-responded slots
+                    try {{
+                        const slots = pubads.getSlots() || [];
+                        for (const s of slots) {{
+                            if (!s || !s.getResponseInformation) continue;
+                            const info = s.getResponseInformation();
+                            if (info) {{
+                                const path = s.getAdUnitPath ? s.getAdUnitPath() : "unknown";
+                                if (!window.__idnmlSlotResponses.includes(path)) {{
+                                    window.__idnmlSlotResponses.push(path);
+                                }}
+                            }}
+                        }}
+                    }} catch(e) {{}}
+
+                    // Listen for new responses
+                    pubads.addEventListener("slotResponseReceived", (event) => {{
+                        try {{
+                            const slot = event && event.slot;
+                            const path = slot && slot.getAdUnitPath ? slot.getAdUnitPath() : "unknown";
+                            if (!window.__idnmlSlotResponses.includes(path)) {{
+                                window.__idnmlSlotResponses.push(path);
+                            }}
+                        }} catch(e) {{}}
+                    }});
+                }}
+                return {{ ok: true, count: window.__idnmlSlotResponses.length }};
+            }} catch (e) {{
+                return {{ ok: false, reason: String(e) }};
+            }}
+        }}
+        """
+
+        init_result = await page.evaluate(init_js)
+        if not init_result.get("ok"):
+            log_fn(f"⚠️ Could not attach GPT listener: {init_result.get('reason')}")
+            return
+
+        # Already had responses?
+        if init_result.get("count", 0) > 0:
+            slots = await page.evaluate(
+                f"""
+                () => {{
+                    const toName = {extract_js};
+                    return (window.__idnmlSlotResponses || []).map(toName);
+                }}
+                """
+            )
+            names = ", ".join(slots) if slots else "unknown"
+            log_fn(f"✅ GPT slotResponseReceived already seen for {len(slots)} slot(s): {names}")
+            return
+
+        # Poll for slot responses
+        while elapsed < timeout:
+            res = await page.evaluate(
+                f"""
+                () => {{
+                    const toName = {extract_js};
+                    const arr = Array.isArray(window.__idnmlSlotResponses)
+                        ? window.__idnmlSlotResponses.slice()
+                        : [];
+                    return {{
+                        count: arr.length,
+                        slots: arr.map(toName)
+                    }};
+                }}
+                """
+            )
+            count = res.get("count", 0)
+            slots = res.get("slots", [])
+
+            if count > 0:
+                names = ", ".join(slots)
+                log_fn(f"✅ GPT slotResponseReceived seen for {count} slot(s): {names}")
+                return
+
+            await asyncio.sleep(interval)
+            elapsed += interval
+
+        # Timeout: partial or no data
+        res = await page.evaluate(
+            f"""
+            () => {{
+                const toName = {extract_js};
+                const arr = Array.isArray(window.__idnmlSlotResponses)
+                    ? window.__idnmlSlotResponses.slice()
+                    : [];
+                return {{
+                    count: arr.length,
+                    slots: arr.map(toName)
+                }};
+            }}
+            """
+        )
+        count = res.get("count", 0)
+        slots = res.get("slots", [])
+
+        if count > 0:
+            names = ", ".join(slots)
+            log_fn(f"⚠️ GPT slotResponseReceived partial ({count}) before timeout: {names}")
+        else:
+            log_fn("⚠️ No GPT slotResponseReceived seen before timeout.")
 
     # ------------- Test discovery -------------
 
@@ -358,6 +500,9 @@ class TestFramework:
         waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
         await waiter.wait_for_prebid_and_gpt(page)
 
+        # NEW: wait for GPT slotResponseReceived before running tests
+        await self._wait_for_gpt_slot_responses(page, logprint)
+
         # Detect page type from GPT key-values (with small polling window)
         page_type_norm = await self._detect_page_type(page)
         logprint(f"🧩 Detected page type: {page_type_norm}")
@@ -485,27 +630,31 @@ class TestFramework:
         warmup_pages = int(self.config.get("warmup_pages", 0) or 0)
         warmup_pages = max(0, min(warmup_pages, total_urls))
 
+        self._warm_page = None
+
         if warmup_pages > 0:
             print(f"🔥 Warmup phase: loading first {warmup_pages} URL(s) without running tests")
-            warm_page = await self.browser_manager.new_page()
-            try:
-                for w_idx, w_url in enumerate(selected_urls[:warmup_pages], start=1):
-                    await self._warmup_url(
-                        page=warm_page,
-                        url=w_url,
-                        warm_idx=w_idx,
-                        total_warm=warmup_pages,
-                        handle_cmp=(w_idx == 1),
-                    )
-            finally:
-                await warm_page.close()
+            self._warm_page = await self.browser_manager.new_page()
+            for w_idx, w_url in enumerate(selected_urls[:warmup_pages], start=1):
+                await self._warmup_url(
+                    page=self._warm_page,
+                    url=w_url,
+                    warm_idx=w_idx,
+                    total_warm=warmup_pages,
+                    handle_cmp=(w_idx == 1),
+                )
             print("🔥 Warmup phase complete.\n")
 
         parallel = self.config.get("parallel_tests", False)
 
         if not parallel:
             # -------- SINGLE-PAGE, SEQUENTIAL MODE --------
-            page = await self.browser_manager.new_page()
+            # Reuse warmup page if we have one; otherwise create a new page
+            if self._warm_page is not None:
+                page = self._warm_page
+                print("♻️ Reusing warmup page for main test run")
+            else:
+                page = await self.browser_manager.new_page()
 
             for url_idx, url in enumerate(selected_urls, start=1):
                 url_results = await self._run_tests_for_url(
@@ -518,8 +667,8 @@ class TestFramework:
                 )
                 results.extend(url_results)
 
-            await page.close()
-
+            # Do NOT close the page explicitly here – closing the browser/context
+            # at the end will clean up all pages.
         else:
             # -------- PARALLEL MODE (bounded concurrency) --------
             concurrency = self.config.get("concurrency", 4)
@@ -548,8 +697,9 @@ class TestFramework:
             for url_results in url_results_lists:
                 results.extend(url_results)
 
-        # Close browser/context
+        # Close browser/context (this closes all pages, including warmup page)
         await self.browser_manager.close()
+        self._warm_page = None
 
         # Write CSV output (still test × URL at this stage)
         await self._write_csv_output(results)

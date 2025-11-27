@@ -30,6 +30,7 @@ UK_BIDDERS = [
     "seedtag",
     "teads",
     "ttd",
+    "taboola"
 ]
 
 UK_MODULES = [

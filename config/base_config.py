@@ -25,12 +25,12 @@ class TestConfig:
         self.browser_config = {
             "headless": False,
             # For now this is the single switch; we’ll refactor to device_mode later
-            "mobile": False,
+            "mobile": True,
             # Playwright default timeout (ms)
             "timeout": 30000,
             # Viewport – keep in sync with mobile flag for now
-            # "viewport": {"width": 390, "height": 844},
-            "viewport": {"width": 1920, "height": 1080},
+            "viewport": {"width": 390, "height": 844},
+            # "viewport": {"width": 1366, "height": 768},
         }
 
         # Framework / test behaviour
@@ -39,7 +39,7 @@ class TestConfig:
             "max_pages": 10,
 
             # Run pages sequentially or in parallel
-            "parallel_tests": True,
+            "parallel_tests": False,
             "concurrency": 4,  # only used when parallel_tests=True
 
             # Debug / robustness settings
