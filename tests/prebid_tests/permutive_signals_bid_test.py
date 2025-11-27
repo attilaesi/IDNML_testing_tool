@@ -75,7 +75,7 @@ class PermutiveSignalsBidTest(BaseTest):
         - We simply check that window.pbjs exists; if not, we skip.
         """
         has_pbjs = await page.evaluate("() => !!window.pbjs")
-        if self.config.get("trace_tests"):
+        if self.config.get("trace"):
             print(
                 f"[PermutiveSignalsBidTest] setup: "
                 f"url={url}, has_pbjs={has_pbjs}"
@@ -207,7 +207,7 @@ class PermutiveSignalsBidTest(BaseTest):
         diag = await page.evaluate(js)
         result.data = diag or {}
 
-        if self.config.get("trace_tests"):
+        if self.config.get("trace"):
             bidders_with_both = {
                 code: info
                 for code, info in (diag.get("perBidder") or {}).items()
@@ -229,7 +229,7 @@ class PermutiveSignalsBidTest(BaseTest):
         total_requests = diag.get("totalRequests", 0)
         per_bidder: Dict[str, Dict[str, Any]] = diag.get("perBidder", {}) or {}
 
-        if self.config.get("trace_tests"):
+        if self.config.get("trace"):
             print(
                 "[PermutiveSignalsBidTest] validate input: "
                 + f'{{"hasPbjs": {has_pbjs}, '
@@ -300,7 +300,7 @@ class PermutiveSignalsBidTest(BaseTest):
 
             result.warnings.append("\n".join(cell_text))
 
-        if self.config.get("trace_tests"):
+        if self.config.get("trace"):
             print(
                 f"[PermutiveSignalsBidTest] result: {result.state.name}\n"
                 + "\n".join(summary_lines)

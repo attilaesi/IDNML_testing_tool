@@ -63,7 +63,7 @@ class ConsentIntegrationTest(BaseTest):
         handled earlier by the framework.
         """
         has_pbjs = await page.evaluate("() => !!window.pbjs")
-        if self.config.get("debug_test_trace"):
+        if self.config.get("trace"):
             print(
                 f"[ConsentIntegrationTest] setup: url={url}, "
                 f"has_pbjs={has_pbjs}"
@@ -123,7 +123,7 @@ class ConsentIntegrationTest(BaseTest):
         diag = await page.evaluate(js)
         result.data = diag or {}
 
-        if self.config.get("debug_test_trace"):
+        if self.config.get("trace"):
             cm = (diag or {}).get("consentManagement")
             print(
                 "[ConsentIntegrationTest] execute diag: "
@@ -224,7 +224,7 @@ class ConsentIntegrationTest(BaseTest):
         # Helpful metadata for CSV / summaries
         result.metadata.setdefault("consent_namespaces", configured_namespaces)
 
-        if self.config.get("debug_test_trace"):
+        if self.config.get("trace"):
             print(
                 "[ConsentIntegrationTest] validate: PASSED; "
                 f"namespaces={configured_namespaces}"
