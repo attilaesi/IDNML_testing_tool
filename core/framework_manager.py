@@ -19,7 +19,6 @@ from core.data_extractor import DataExtractor  # noqa: F401 (used by tests)
 
 from config.site_test_plans import SITE_TEST_PLANS
 
-
 class TestFramework:
     def __init__(self, config: Dict):
         self.config = config
@@ -283,19 +282,64 @@ class TestFramework:
         )
         return urls
 
+    # ------------- Warmup runner -------------
+
+    async def _warmup_url(
+        self,
+        page,
+        url: str,
+        warm_idx: int,
+        total_warm: int,
+        handle_cmp: bool,
+    ) -> None:
+        """
+        Warmup-only navigation:
+        - basic auth
+        - context cookies
+        - CMP (optional, usually first warmup only)
+        - wait for Prebid + GPT
+
+        No tests are run and no results are recorded.
+        """
+        print(f"[WARMUP {warm_idx}/{total_warm}] {url}")
+
+        auth_url = self._add_basic_auth_to_url(url)
+        await self._set_context_cookies(page, auth_url)
+        await page.goto(auth_url, wait_until="domcontentloaded")
+
+        if handle_cmp:
+            await self.cmp_handler.handle_consent(page)
+
+        waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
+        await waiter.wait_for_prebid_and_gpt(page)
+
+        print(f"[WARMUP {warm_idx}/{total_warm}] done")
+
     # ------------- Per-URL runner -------------
 
     async def _run_tests_for_url(
         self,
         page,
         url: str,
-        test_instances: List[BaseTest],
+        test_classes: List[Type[BaseTest]],
         url_idx: int,
         total_urls: int,
         handle_cmp: bool,
     ) -> List[TestResult]:
-        """Navigate to URL, prepare environment, run all tests, return results."""
-        print(f"[{url_idx}/{total_urls}] Processing {url}")
+        """
+        Navigate to URL, prepare environment, run all tests, return results.
+
+        All logging for this URL is buffered and printed as a single
+        grouped block (helps readability when running in parallel).
+        """
+        # Per-URL log buffer
+        log: List[str] = []
+
+        def logprint(*args):
+            msg = " ".join(str(a) for a in args)
+            log.append(msg)
+
+        logprint(f"[{url_idx}/{total_urls}] Processing {url}")
 
         # Inject credentials for UAT/DEV/feature branches if needed
         auth_url = self._add_basic_auth_to_url(url)
@@ -316,15 +360,18 @@ class TestFramework:
 
         # Detect page type from GPT key-values (with small polling window)
         page_type_norm = await self._detect_page_type(page)
-        print(f"🧩 Detected page type: {page_type_norm}")
+        logprint(f"🧩 Detected page type: {page_type_norm}")
 
         # Detect locale from Locale cookie (UK / US)
         locale = await self._detect_locale(page)
-        print(f"🗺️  Detected locale: {locale}")
+        logprint(f"🗺️  Detected locale: {locale}")
 
         # 🔸 Apply site test plan (inherit-all, then exclude by page type)
         site_id = str(self.config.get("active_site", "independent")).lower()
         site_plan = SITE_TEST_PLANS.get(site_id, {})
+
+        def _class_name(cls: Type[BaseTest]) -> str:
+            return getattr(cls, "name", cls.__name__)
 
         if site_plan and site_plan.get("exclude") is not None:
             excluded_site = set(site_plan.get("exclude", []))
@@ -335,20 +382,20 @@ class TestFramework:
             disallowed = excluded_site | excluded_pt
 
             # Only instantiate / run tests that are allowed for this URL
-            run_list = [ti for ti in test_instances if ti.name not in disallowed]
-
-            # NOTE:
-            #   - We do NOT create TestResult objects for excluded tests.
-            #   - We do NOT print "SKIPPED (excluded for site)" here.
-            #     Excluded tests are treated as "not part of this site's plan".
+            run_classes = [
+                cls for cls in test_classes if _class_name(cls) not in disallowed
+            ]
         else:
             # No site plan -> run everything discovered
-            run_list = list(test_instances)
+            run_classes = list(test_classes)
 
         url_results: List[TestResult] = []
 
-        # Run each test for this URL
-        for test in run_list:
+        # Run each test for this URL (fresh instance per class)
+        for cls in run_classes:
+            test_name = _class_name(cls)
+            test = cls(self.config)
+
             # Expose locale on the test instance so tests can read self.locale
             try:
                 setattr(test, "locale", locale)
@@ -370,12 +417,27 @@ class TestFramework:
                     pass
 
                 url_results.append(result)
-                print(f"  {test.name}: {result.state.value}")
+                logprint(f"  {test_name}: {result.state.value}")
             except Exception as e:
-                print(f"  {test.name}: ERROR - {str(e)}")
+                logprint(f"  {test_name}: ERROR - {str(e)}")
 
         left = total_urls - url_idx
-        print(f"[{url_idx}/{total_urls}] done, {left} left")
+        logprint(f"[{url_idx}/{total_urls}] done, {left} left")
+
+        # Flush the buffered log as a single block so parallel runs don't interleave
+        block_lines = [
+            "",
+            "=" * 80,
+            f"📄 RESULT BLOCK FOR URL {url_idx}/{total_urls}",
+            url,
+            "=" * 80,
+        ]
+        block_lines.extend(log)
+        block_lines.append("=" * 80)
+        block_lines.append("")
+
+        print("\n".join(block_lines))
+
         return url_results
 
     # ------------- Main runner -------------
@@ -386,22 +448,19 @@ class TestFramework:
         """Run specified tests, using either single-page mode or parallel mode."""
         results: List[TestResult] = []
 
-        # Which tests to run? (we build the full pool; site plan is applied per URL)
+        # Which tests to run? (we build the full pool of *classes*; site plan is applied per URL)
         if test_names:
-            test_instances = [
-                self.create_test_instance(name)
+            test_classes: List[Type[BaseTest]] = [
+                self.tests[name]
                 for name in test_names
                 if name in self.tests
             ]
         elif category:
             test_classes = self.get_tests_by_category(category)
-            test_instances = [test_class(self.config) for test_class in test_classes]
         else:
-            test_instances = [
-                test_class(self.config) for test_class in self.tests.values()
-            ]
+            test_classes = list(self.tests.values())
 
-        if not test_instances:
+        if not test_classes:
             print("No tests found to run")
             return results
 
@@ -422,6 +481,26 @@ class TestFramework:
             await self.browser_manager.close()
             return results
 
+        # ---------- Warmup phase ----------
+        warmup_pages = int(self.config.get("warmup_pages", 0) or 0)
+        warmup_pages = max(0, min(warmup_pages, total_urls))
+
+        if warmup_pages > 0:
+            print(f"🔥 Warmup phase: loading first {warmup_pages} URL(s) without running tests")
+            warm_page = await self.browser_manager.new_page()
+            try:
+                for w_idx, w_url in enumerate(selected_urls[:warmup_pages], start=1):
+                    await self._warmup_url(
+                        page=warm_page,
+                        url=w_url,
+                        warm_idx=w_idx,
+                        total_warm=warmup_pages,
+                        handle_cmp=(w_idx == 1),
+                    )
+            finally:
+                await warm_page.close()
+            print("🔥 Warmup phase complete.\n")
+
         parallel = self.config.get("parallel_tests", False)
 
         if not parallel:
@@ -432,10 +511,10 @@ class TestFramework:
                 url_results = await self._run_tests_for_url(
                     page=page,
                     url=url,
-                    test_instances=test_instances,
+                    test_classes=test_classes,
                     url_idx=url_idx,
                     total_urls=total_urls,
-                    handle_cmp=(url_idx == 1),
+                    handle_cmp=(url_idx == 1 and warmup_pages == 0),
                 )
                 results.extend(url_results)
 
@@ -453,10 +532,10 @@ class TestFramework:
                         return await self._run_tests_for_url(
                             page=page,
                             url=url,
-                            test_instances=test_instances,
+                            test_classes=test_classes,
                             url_idx=url_idx,
                             total_urls=total_urls,
-                            handle_cmp=(url_idx == 1),
+                            handle_cmp=(url_idx == 1 and warmup_pages == 0),
                         )
                     finally:
                         await page.close()
