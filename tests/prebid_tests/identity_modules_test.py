@@ -1,5 +1,5 @@
 from core.base_test import BaseTest, TestResult, TestState
-from tests.prebid_tests.test_settings import get_geo_config
+from config.test_settings import get_geo_config
 from utils.geo_utils import detect_geo_from_cookies
 
 

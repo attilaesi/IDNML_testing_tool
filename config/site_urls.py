@@ -11,9 +11,10 @@ SITE_PROFILES = {
         ],
         "uat_urls": [
             "https://uat-web.independent.co.uk/news/test-test-test-nhl-las-vegas-marty-walsh-canada-ontario-b2823642.html",
-            "https://uat-web.independent.co.uk/extras/indybest/christmasgifts/beauty-advent-calendar-makeup-uk-b2235321.html",
+            "https://uat-web.independent.co.uk/news/test-test-test-chagos-diego-garcia-trump-legal-case-b2823645.html",
             "https://uat-web.independent.co.uk/news/world/middle-east/qatar-explosion-israel-airstrike-hamas-doha-latest-news-b2823119.html",
-            "https://uat-web.independent.co.uk/news/test-test-test-snp-kirsty-blackman-commons-mps-children-b2823608.html"
+            "https://uat-web.independent.co.uk/news/test-test-test-snp-kirsty-blackman-commons-mps-children-b2823608.html",
+            "https://uat-web.independent.co.uk/climate-change/news/shark-teeth-ocean-acidification-co2-b2814061.html"
         ],
     },
 

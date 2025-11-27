@@ -19,7 +19,7 @@ class TestConfig:
         # UAT vs LIVE
         #   False => use live URLs from SITE_PROFILES
         #   True  => use UAT URLs + basic auth + feature cookies
-        self.uat_mode = False
+        self.uat_mode = True
 
         # Browser-level settings
         self.browser_config = {
@@ -54,7 +54,7 @@ class TestConfig:
 
             # 🔸 NEW: global trace switch for extra console logging in tests
             # Set to True when you want verbose per-test diagnostics.
-            "trace": True,
+            "trace": False,
         }
 
         # Output configuration

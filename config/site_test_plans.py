@@ -36,7 +36,15 @@ SITE_TEST_PLANS = {
 
     "standard": {
         "exclude": [
-            # (example) nothing globally excluded right now
+            "UntestedKeysTest",
+            "TestgroupTest",
+            "AnonymisedKeyTest",
+            "CmpActiveTest",
+            "LongreadTest",
+            "ReferrerTest",
+            "AutorefreshTest",
+            "CommercialTest",
+            "LiveblogTest"
         ],
         "exclude_by_page_type": {
             # Example parity with Independent

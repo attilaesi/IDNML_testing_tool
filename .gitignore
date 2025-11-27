@@ -18,6 +18,7 @@ __pycache__/
 ###############################################################################
 output.csv
 output_by_pagetype.csv
+import_independent_mappings.py
 
 ###############################################################################
 # Directories that contain runtime artefacts — keep folder, ignore contents

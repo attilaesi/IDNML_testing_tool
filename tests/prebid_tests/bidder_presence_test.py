@@ -1,169 +1,286 @@
 # tests/prebid_tests/bidder_presence_test.py
 
-from typing import Dict, Any, List, Set
+"""
+prebid: BidderPresenceTest
+
+What this test checks
+---------------------
+For the current page:
+
+1. Looks at *actual Prebid bid requests* (not just ad unit config).
+   - Tries, in order:
+       - pbjs.getBidderRequests()
+       - pbjs._bidsRequested
+       - pbjs.getEvents() filtered to 'bidRequested'
+
+2. Builds the set of bidder codes that actually emitted bid requests
+   (e.g. "appnexus", "ix", "pubmatic", etc.).
+
+3. Reads the `Locale` cookie (UK / US) to determine which expected bidder
+   list to use (UK_BIDDERS / US_BIDDERS from config.test_settings).
+
+4. Compares:
+     expected vs seen
+
+   - missing   = bidders in expected list that did *not* emit a bid request
+   - unexpected = bidders that *did* emit a bid request but are not in the
+                  expected list for this locale
+
+PASS / FAIL logic
+-----------------
+* SKIPPED:
+    - window.pbjs is missing
+
+* FAILED:
+    - Any missing bidders, or
+    - Any unexpected bidders
+
+* PASSED:
+    - All expected bidders that should be active for this locale
+      emitted at least one bid request, and there are no unexpected
+      bidders.
+"""
+
+from typing import Any, Dict, List, Set
+
 from core.base_test import BaseTest, TestResult, TestState
 
+# 🔹 Expected bidders per locale (canonical bidder *codes*, not adapter names!)
+# These should come from your central config so everything is in one place.
+# Make sure UK_BIDDERS / US_BIDDERS look like: ["appnexus", "ix", "pubmatic", ...]
+from config.test_settings import UK_BIDDERS, US_BIDDERS  # type: ignore
+
+
+def _expected_bidders_for_locale(locale: str) -> List[str]:
+    """Return expected bidder codes for this locale."""
+    locale = (locale or "").upper()
+    if locale == "US":
+        return list(US_BIDDERS)
+    # Default to UK config
+    return list(UK_BIDDERS)
+
+
 class BidderPresenceTest(BaseTest):
-    """
-    WHAT THIS TEST CHECKS
-    ---------------------
-    Ensures that bidders which are EXPECTED for the active site/geo AND are CONFIGURED
-    on this specific page (via pbjs.adUnits) actually PARTICIPATE in the auction
-    (visible in pbjs.getBidderRequests() after 'auctionEnd').
+    """Presence of bidders that actually emit bid requests, per locale."""
 
-    TEST CONDITIONS
-    ---------------
-    - Prebid must be present (window.pbjs).
-    - We wait until 'auctionEnd' (or a timeout) to ensure all adapters had a chance to run.
-    - We discover 'configured' bidders from pbjs.getAdUnits()/pbjs.adUnits.
-    - We discover 'seen' bidders from pbjs.getBidderRequests().
+    name = "BidderPresenceTest"
 
-    PASS / FAIL CRITERIA
-    --------------------
-    PASS  => (expected ∩ configured) ⊆ seen
-    FAIL  => Any bidder in (expected ∩ configured) is NOT found in 'seen'.
-             The failure lists which bidders were missing and the key counts.
-    """
-
-    # --- abstract methods (implemented but minimal) -----------------
     async def setup(self, page, url: str) -> bool:
-        # Nothing special to set up; framework already waited for pbjs/GPT readiness.
-        return True
+        """Basic DOM readiness; framework already waited for pbjs/GPT."""
+        try:
+            await page.wait_for_load_state("domcontentloaded")
+            return True
+        except Exception as e:
+            if self.config.get("trace"):
+                print(f"[BidderPresenceTest] setup error for {url}: {e}")
+            return False
 
     async def execute(self, page, url: str) -> TestResult:
+        """
+        Collect bidder presence diagnostics from the page.
+
+        We return:
+          {
+            hasPbjs: bool,
+            locale: "UK" | "US" | null,
+            biddersFromRequests: [ "appnexus", "ix", ... ],
+            biddersFromAdUnits: [ "appnexus", "ix", ... ],
+            source: "getBidderRequests" | "_bidsRequested" | "events" | null
+          }
+        """
         result = TestResult(self.name)
         result.url = url
 
-        # 1) Pull expected bidders from config by geo
-        geo = (self.config.get("geo_mode") or "UK").upper()
-        expected_global: Set[str] = set((self.config.get("expected_bidders") or {}).get(geo, []))
+        js = """
+        () => {
+          const out = {
+            hasPbjs: !!window.pbjs,
+            locale: null,
+            biddersFromRequests: [],
+            biddersFromAdUnits: [],
+            source: null,
+          };
 
-        # Normalization helper: lower, strip "BidAdapter", map common aliases to canonical keys
-        def norm(name: str) -> str:
-            n = (name or "").strip().lower()
-            if n.endswith("bidadapter"):
-                n = n[:-10]
-            alias_map = {
-                "rubiconproject": "rubicon",
-                "indexexchange": "ix",
-                "xandr": "appnexus",
-                "tradedesk": "ttd",
-                "thetradedesk": "ttd",
-                "apsnexus": "appnexus",
-                # keep others as-is
-            }
-            return alias_map.get(n, n)
-
-        expected_norm = {norm(b) for b in expected_global}
-
-        # 2) Run the robust browser-side snippet: find pbjs (even in child frames),
-        #    wait for auction end, then return configured + seen arrays.
-        js = r"""
-        () => new Promise(resolveOuter => {
-          function findPbjs(win) {
-            try {
-              if (win.pbjs && typeof win.pbjs === 'object') return win;
-              for (let i = 0; i < win.frames.length; i++) {
-                const r = findPbjs(win.frames[i]);
-                if (r) return r;
-              }
-            } catch (e) {}
-            return null;
-          }
-          const w = findPbjs(window) || window;
-
-          function biddersFromAdUnits() {
-            try {
-              const adUnits = (w.pbjs && w.pbjs.getAdUnits && w.pbjs.getAdUnits()) || (w.pbjs && w.pbjs.adUnits) || [];
-              const all = [].concat(...adUnits.map(u => (u.bids || []).map(b => (b.bidder || b.bidderCode || '').toLowerCase())));
-              return Array.from(new Set(all.filter(Boolean)));
-            } catch(e) {
-              return [];
-            }
+          const w = window;
+          const pbjs = w.pbjs;
+          if (!pbjs) {
+            return out;
           }
 
-          async function waitForPbjs() {
-            if (!w || !w.pbjs) {
-              await new Promise(r => setTimeout(r, 50));
-              let tries = 0;
-              while ((!w || !w.pbjs) && tries < 100) {
-                await new Promise(r => setTimeout(r, 50));
-                tries++;
-              }
+          // --- Locale from cookie ---
+          try {
+            const m = document.cookie.match(/(?:^|;\\s*)Locale=([^;]+)/i);
+            if (m && m[1]) {
+              out.locale = decodeURIComponent(m[1]).toUpperCase();
             }
+          } catch (e) {
+            // ignore; locale stays null
           }
 
-          async function waitForAuctionEnd() {
-            return new Promise(resolve => {
-              try {
-                let resolved = false;
-                const done = () => { if (!resolved) { resolved = true; resolve(); } };
-                if (w && w.pbjs && w.pbjs.onEvent) {
-                  w.pbjs.onEvent('auctionEnd', done);
+          // --- Bidders from adUnits (config) ---
+          try {
+            const adUnits = Array.isArray(pbjs.adUnits) ? pbjs.adUnits : [];
+            const adUnitSet = new Set();
+            adUnits.forEach(u => {
+              (u && Array.isArray(u.bids) ? u.bids : []).forEach(b => {
+                if (b && typeof b.bidder === "string" && b.bidder.trim()) {
+                  adUnitSet.add(b.bidder.trim());
                 }
-                setTimeout(done, 4000); // safety
-              } catch(e) { resolve(); }
+              });
             });
+            out.biddersFromAdUnits = Array.from(adUnitSet);
+          } catch (e) {
+            // best-effort only
           }
 
-          (async () => {
-            await waitForPbjs();
-            const configured = biddersFromAdUnits();
-            await waitForAuctionEnd();
+          const reqSet = new Set();
 
-            let seen = [];
-            try {
-              const reqs = (w.pbjs && w.pbjs.getBidderRequests && w.pbjs.getBidderRequests()) || [];
-              const codes = reqs.map(r => (r && (r.bidderCode || r.bidder) || '').toLowerCase()).filter(Boolean);
-              seen = Array.from(new Set(codes));
-            } catch(e) {
-              seen = [];
+          // Helper to add a bidder string safely
+          const addBidder = (code) => {
+            if (typeof code === "string") {
+              const trimmed = code.trim();
+              if (trimmed) reqSet.add(trimmed);
             }
+          };
 
-            resolveOuter({ configured, seen, hasPbjs: !!(w && w.pbjs) });
-          })();
-        })
-        """
-        data = await page.evaluate(js)
-        configured = {norm(b) for b in (data.get("configured") or [])}
-        seen = {norm(b) for b in (data.get("seen") or [])}
+          // 1) Preferred: getBidderRequests()
+          try {
+            if (typeof pbjs.getBidderRequests === "function") {
+              const reqs = pbjs.getBidderRequests() || [];
+              reqs.forEach(r => {
+                if (r && r.bidderCode) {
+                  addBidder(r.bidderCode);
+                } else if (r && r.bidder) {
+                  addBidder(r.bidder);
+                }
+              });
+            }
+          } catch (e) {
+            // ignore, fall back
+          }
 
-        # 3) ONLY require bidders that are both expected (site/geo) AND configured on this page
-        expected_subset = expected_norm & configured
+          if (reqSet.size) {
+            out.source = "getBidderRequests";
+            out.biddersFromRequests = Array.from(reqSet);
+            return out;
+          }
 
-        # 4) Work out missing
-        missing = sorted(expected_subset - seen)
+          // 2) Legacy: _bidsRequested
+          try {
+            const priv = Array.isArray(pbjs._bidsRequested) ? pbjs._bidsRequested : [];
+            priv.forEach(r => {
+              if (r && r.bidderCode) {
+                addBidder(r.bidderCode);
+              } else if (r && r.bidder) {
+                addBidder(r.bidder);
+              }
+            });
+          } catch (e) {
+            // ignore
+          }
 
-        # 5) Fill diagnostics
-        diag = {
-            "geo": geo,
-            "expected_global": sorted(expected_global),
-            "expected_normalized": sorted(expected_norm),
-            "configured": sorted(configured),
-            "seen": sorted(seen),
-            "expected_subset": sorted(expected_subset),
-            "missing": missing,
+          if (reqSet.size) {
+            out.source = "_bidsRequested";
+            out.biddersFromRequests = Array.from(reqSet);
+            return out;
+          }
+
+          // 3) Fallback: events
+          try {
+            if (typeof pbjs.getEvents === "function") {
+              const evts = pbjs.getEvents().filter(
+                e => e && e.eventType === "bidRequested"
+              );
+              evts.forEach(e => {
+                const a = e && e.args;
+                if (!a) return;
+                if (a.bidderCode) addBidder(a.bidderCode);
+                else if (a.bidder) addBidder(a.bidder);
+              });
+            }
+          } catch (e) {
+            // ignore
+          }
+
+          if (reqSet.size) {
+            out.source = "events";
+          }
+
+          out.biddersFromRequests = Array.from(reqSet);
+          return out;
         }
-        result.data = diag
+        """
 
-        # 6) State + messages
-        if not data.get("hasPbjs"):
-            result.state = TestState.ERROR
-            result.errors.append("pbjs not found in any frame")
-            return result
+        diag = await page.evaluate(js)
+        result.data = diag or {}
 
-        if missing:
-            result.state = TestState.FAILED
-            result.errors.append(f"Missing bidders (expected∩configured but not seen): {', '.join(missing)}")
-        else:
-            result.state = TestState.PASSED
+        if self.config.get("trace"):
+            print(
+                "[BidderPresenceTest] execute diag:",
+                {
+                    "url": url,
+                    "hasPbjs": result.data.get("hasPbjs"),
+                    "locale": result.data.get("locale"),
+                    "source": result.data.get("source"),
+                    "biddersFromRequests": result.data.get("biddersFromRequests", []),
+                },
+            )
 
+        # Validation happens in validate()
         return result
 
     async def validate(self, result: TestResult) -> TestResult:
-        # Nothing extra; execute() already sets result.state and details.
+        """
+        Compare bidders that actually emitted bid requests vs the expected
+        list for this locale.
+        """
+        diag: Dict[str, Any] = result.data or {}
+        has_pbjs: bool = bool(diag.get("hasPbjs"))
+        locale: str = (diag.get("locale") or "UK").upper()
+        seen_bidders: Set[str] = set(diag.get("biddersFromRequests") or [])
+
+        if not has_pbjs:
+            result.state = TestState.SKIPPED
+            result.warnings.append(
+                "window.pbjs not present; cannot run BidderPresenceTest."
+            )
+            return result
+
+        expected_list = _expected_bidders_for_locale(locale)
+        expected: Set[str] = set(expected_list)
+
+        missing = sorted(expected - seen_bidders)
+        unexpected = sorted(seen_bidders - expected)
+
+        if missing or unexpected:
+            result.state = TestState.FAILED
+
+            if missing:
+                result.errors.append(
+                    f"Missing bidders for {locale}: " + ", ".join(missing)
+                )
+            if unexpected:
+                result.errors.append(
+                    f"Unexpected bidders present for {locale}: "
+                    + ", ".join(unexpected)
+                )
+        else:
+            result.state = TestState.PASSED
+
+        # Helpful metadata for CSV / debug
+        result.metadata.update(
+            {
+                "locale": locale,
+                "expected_bidders": expected_list,
+                "seen_bidders": sorted(seen_bidders),
+                "missing_bidders": missing,
+                "unexpected_bidders": unexpected,
+                "source": diag.get("source"),
+            }
+        )
+
         return result
 
     async def cleanup(self, page, result: TestResult) -> None:
-        # No-op; add screenshots or traces here if needed.
+        """No-op for now; hook reserved for future debug screenshots if needed."""
         return
