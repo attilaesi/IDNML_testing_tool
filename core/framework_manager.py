@@ -1,23 +1,19 @@
 # core/framework_manager.py
 
-import importlib
-import pkgutil
-import csv
 import asyncio
-import inspect
-import sys
-import os
-from pathlib import Path
 from typing import List, Dict, Type, Optional
 from urllib.parse import urlparse, urlunparse
 
 from core.readiness_waiter import ReadinessWaiter
-from core.base_test import BaseTest, TestResult, TestState
+from core.base_test import BaseTest, TestResult, TestState  # TestState kept for completeness
 from core.browser_manager import BrowserManager
 from core.cmp_handler import CMPHandler
 from core.data_extractor import DataExtractor  # noqa: F401 (used by tests)
 
 from config.site_test_plans import SITE_TEST_PLANS
+
+from core.framework.discovery import discover_tests, get_tests_by_category
+from core.framework.csv_writer import CSVWriter
 
 
 class TestFramework:
@@ -30,6 +26,9 @@ class TestFramework:
 
         # Hold onto a warmup page so we can reuse it for tests
         self._warm_page = None
+
+        # CSV writer helper
+        self.csv_writer = CSVWriter(config)
 
     # ------------- URL helpers -------------
 
@@ -188,219 +187,18 @@ class TestFramework:
 
         return "unknown"
 
-
-    async def _wait_for_gpt_slot_responses(self, page, log_fn) -> None:
-        """
-        Wait until GPT fires 'slotResponseReceived'.
-        Logs ONLY the slot names (last path segment).
-        """
-        timeout = float(self.config.get("gpt_slot_timeout", 7.0))
-        interval = 0.25
-        elapsed = 0.0
-
-        # Helper to extract slot name from full path
-        extract_js = """
-        (path) => {
-            try {
-                if (!path) return "unknown";
-                const parts = path.split("/");
-                return parts[parts.length - 1] || "unknown";
-            } catch (e) {
-                return "unknown";
-            }
-        }
-        """
-
-        # Init listener + capture any initial slots
-        init_js = f"""
-        () => {{
-            try {{
-                if (!window.googletag || !googletag.pubads) {{
-                    return {{ ok: false, reason: "googletag/pubads missing" }};
-                }}
-                const pubads = googletag.pubads();
-
-                if (!window.__idnmlSlotResponses) {{
-                    window.__idnmlSlotResponses = [];
-
-                    // Capture any already-responded slots
-                    try {{
-                        const slots = pubads.getSlots() || [];
-                        for (const s of slots) {{
-                            if (!s || !s.getResponseInformation) continue;
-                            const info = s.getResponseInformation();
-                            if (info) {{
-                                const path = s.getAdUnitPath ? s.getAdUnitPath() : "unknown";
-                                if (!window.__idnmlSlotResponses.includes(path)) {{
-                                    window.__idnmlSlotResponses.push(path);
-                                }}
-                            }}
-                        }}
-                    }} catch(e) {{}}
-
-                    // Listen for new responses
-                    pubads.addEventListener("slotResponseReceived", (event) => {{
-                        try {{
-                            const slot = event && event.slot;
-                            const path = slot && slot.getAdUnitPath ? slot.getAdUnitPath() : "unknown";
-                            if (!window.__idnmlSlotResponses.includes(path)) {{
-                                window.__idnmlSlotResponses.push(path);
-                            }}
-                        }} catch(e) {{}}
-                    }});
-                }}
-                return {{ ok: true, count: window.__idnmlSlotResponses.length }};
-            }} catch (e) {{
-                return {{ ok: false, reason: String(e) }};
-            }}
-        }}
-        """
-
-        init_result = await page.evaluate(init_js)
-        if not init_result.get("ok"):
-            log_fn(f"⚠️ Could not attach GPT listener: {init_result.get('reason')}")
-            return
-
-        # Already had responses?
-        if init_result.get("count", 0) > 0:
-            slots = await page.evaluate(
-                f"""
-                () => {{
-                    const toName = {extract_js};
-                    return (window.__idnmlSlotResponses || []).map(toName);
-                }}
-                """
-            )
-            names = ", ".join(slots) if slots else "unknown"
-            log_fn(f"✅ GPT slotResponseReceived already seen for {len(slots)} slot(s): {names}")
-            return
-
-        # Poll for slot responses
-        while elapsed < timeout:
-            res = await page.evaluate(
-                f"""
-                () => {{
-                    const toName = {extract_js};
-                    const arr = Array.isArray(window.__idnmlSlotResponses)
-                        ? window.__idnmlSlotResponses.slice()
-                        : [];
-                    return {{
-                        count: arr.length,
-                        slots: arr.map(toName)
-                    }};
-                }}
-                """
-            )
-            count = res.get("count", 0)
-            slots = res.get("slots", [])
-
-            if count > 0:
-                names = ", ".join(slots)
-                log_fn(f"✅ GPT slotResponseReceived seen for {count} slot(s): {names}")
-                return
-
-            await asyncio.sleep(interval)
-            elapsed += interval
-
-        # Timeout: partial or no data
-        res = await page.evaluate(
-            f"""
-            () => {{
-                const toName = {extract_js};
-                const arr = Array.isArray(window.__idnmlSlotResponses)
-                    ? window.__idnmlSlotResponses.slice()
-                    : [];
-                return {{
-                    count: arr.length,
-                    slots: arr.map(toName)
-                }};
-            }}
-            """
-        )
-        count = res.get("count", 0)
-        slots = res.get("slots", [])
-
-        if count > 0:
-            names = ", ".join(slots)
-            log_fn(f"⚠️ GPT slotResponseReceived partial ({count}) before timeout: {names}")
-        else:
-            log_fn("⚠️ No GPT slotResponseReceived seen before timeout.")
-
     # ------------- Test discovery -------------
-
-    def _iter_test_module_names(self):
-        """
-        Dynamically discover and yield all test module names under the top-level
-        'tests' directory — including all subpackages like prebid_tests, gpt_tests, etc.
-
-        We include any module that contains "test" in its module name.
-        """
-        root_pkg = "tests"
-        tests_root = Path(__file__).resolve().parent.parent / "tests"
-
-        # Ensure tests_root’s parent (project root) is on sys.path
-        tests_root_parent = tests_root.parent
-        if str(tests_root_parent) not in sys.path:
-            sys.path.insert(0, str(tests_root_parent))
-
-        # Import the top-level tests package
-        try:
-            importlib.import_module(root_pkg)
-        except Exception as e:
-            print(f"⚠️  Could not import root package {root_pkg}: {e}")
-            return
-
-        # Recursively walk all packages and yield .py modules that look like test files
-        for _importer, modname, _ispkg in pkgutil.walk_packages(
-            [str(tests_root)], prefix=f"{root_pkg}."
-        ):
-            # Skip dunder/private
-            if modname.split(".")[-1].startswith("_"):
-                continue
-            # Only yield modules that look like tests by name
-            if "test" in modname.lower():
-                yield modname
 
     def discover_tests(self) -> None:
         """
         Import test modules and collect classes that inherit BaseTest.
         Populates self.tests (name -> class) and self.test_categories (category -> [names]).
         """
-        self.tests = {}
-        self.test_categories = {}
-
-        for module_name in self._iter_test_module_names():
-            try:
-                test_module = importlib.import_module(module_name)
-            except Exception as e:
-                print(f"❌ Failed to import {module_name}: {e}")
-                continue
-
-            # Determine category from folder name (informational only)
-            if ".prebid_tests." in module_name:
-                category = "PREBID"
-            elif ".gpt_tests." in module_name:
-                category = "GPT"
-            else:
-                category = "OTHER"
-
-            self.test_categories.setdefault(category, [])
-
-            # Collect concrete subclasses defined in this module
-            for name, obj in inspect.getmembers(test_module, inspect.isclass):
-                if obj.__module__ != module_name:
-                    continue
-                if not issubclass(obj, BaseTest) or obj is BaseTest:
-                    continue
-
-                self.tests[name] = obj
-                self.test_categories[category].append(name)
-                print(f"Discovered test: {name} in category {category}")
+        self.tests, self.test_categories = discover_tests()
 
     def get_tests_by_category(self, category: str) -> List[Type[BaseTest]]:
         """Get all tests in a specific category."""
-        test_names = self.test_categories.get(category.upper(), [])
-        return [self.tests[name] for name in test_names]
+        return get_tests_by_category(self.tests, self.test_categories, category)
 
     def create_test_instance(self, test_name: str) -> BaseTest:
         """Create instance of specific test."""
@@ -496,12 +294,9 @@ class TestFramework:
         if handle_cmp:
             await self.cmp_handler.handle_consent(page)
 
-        # Wait until pbjs & GPT are fully ready
+        # Wait until pbjs & GPT are fully ready (inc. GPT slotResponseReceived logic)
         waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
         await waiter.wait_for_prebid_and_gpt(page)
-
-        # NEW: wait for GPT slotResponseReceived before running tests
-        await self._wait_for_gpt_slot_responses(page, logprint)
 
         # Detect page type from GPT key-values (with small polling window)
         page_type_norm = await self._detect_page_type(page)
@@ -702,183 +497,9 @@ class TestFramework:
         self._warm_page = None
 
         # Write CSV output (still test × URL at this stage)
-        await self._write_csv_output(results)
+        await self.csv_writer.write_main(results)
 
         # Write additional page-type summary CSV
-        await self._write_pagetype_summary(results)
+        await self.csv_writer.write_pagetype_summary(results)
 
         return results
-
-    # ------------- CSV output -------------
-
-    async def _write_csv_output(self, results: List[TestResult]):
-        if not results:
-            return
-
-        # Use configured path, defaulting inside output/
-        output_file = self.config.get("output_file", "output/output.csv")
-        output_path = Path(output_file)
-
-        # Ensure parent directory exists
-        if output_path.parent:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Unique URLs (columns)
-        urls: List[str] = []
-        for r in results:
-            if getattr(r, "url", None) and r.url not in urls:
-                urls.append(r.url)
-
-        # URL -> page_type
-        url_page_type: Dict[str, str] = {}
-        for r in results:
-            url = getattr(r, "url", None)
-            if not url:
-                continue
-            meta = getattr(r, "metadata", None)
-            if isinstance(meta, dict):
-                pt = meta.get("page_type")
-                if pt and url not in url_page_type:
-                    url_page_type[url] = str(pt)
-
-        # Unique test names
-        test_names: List[str] = []
-        for r in results:
-            if r.test_name not in test_names:
-                test_names.append(r.test_name)
-
-        # Index results by (test_name, url)
-        result_map: Dict[tuple, TestResult] = {}
-        for r in results:
-            url = getattr(r, "url", None)
-            if url:
-                result_map[(r.test_name, url)] = r
-
-        # Header
-        header_labels = []
-        for url in urls:
-            pt = url_page_type.get(url)
-            header_labels.append(f"{url} ({pt})" if pt else url)
-
-        cols = ["TestName"] + header_labels
-
-        with open(output_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=cols)
-            writer.writeheader()
-
-            for test_name in test_names:
-                row: Dict[str, str] = {"TestName": test_name}
-                for url, col_name in zip(urls, header_labels):
-                    res = result_map.get((test_name, url))
-                    if not res:
-                        row[col_name] = ""
-                        continue
-                    status = res.state.value if hasattr(res, "state") else "UNKNOWN"
-                    if res.errors:
-                        detail = "; ".join(res.errors)
-                        row[col_name] = f"{status}\n{detail}"
-                    else:
-                        row[col_name] = status
-                writer.writerow(row)
-
-        print(f"📄 Results written to: {output_path}")
-
-    async def _write_pagetype_summary(self, results: List[TestResult]):
-        if not results:
-            return
-
-        # Use configured path, defaulting inside output/
-        output_file = self.config.get(
-            "output_pagetype_file", "output/output_by_pagetype.csv"
-        )
-        output_path = Path(output_file)
-
-        # Ensure parent directory exists
-        if output_path.parent:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        page_types: List[str] = []
-        pt_urls: Dict[str, set[str]] = {}
-
-        for r in results:
-            url = getattr(r, "url", None)
-            meta = getattr(r, "metadata", None)
-            pt = None
-            if isinstance(meta, dict):
-                pt = meta.get("page_type")
-            if not pt:
-                pt = "unknown"
-            pt = str(pt)
-            if pt not in page_types:
-                page_types.append(pt)
-            if url:
-                pt_urls.setdefault(pt, set()).add(url)
-
-        if "unknown" in page_types and len(page_types) > 1:
-            page_types = [p for p in page_types if p != "unknown"] + ["unknown"]
-
-        test_names: List[str] = []
-        for r in results:
-            if r.test_name not in test_names:
-                test_names.append(r.test_name)
-
-        grouped: Dict[tuple[str, str], List[TestResult]] = {}
-        for r in results:
-            meta = getattr(r, "metadata", None)
-            pt = None
-            if isinstance(meta, dict):
-                pt = meta.get("page_type")
-            if not pt:
-                pt = "unknown"
-            pt = str(pt)
-            key = (r.test_name, pt)
-            grouped.setdefault(key, []).append(r)
-
-        def summarise(cell_results: List[TestResult]) -> str:
-            if not cell_results:
-                return ""
-            error_res = next(
-                (cr for cr in cell_results if cr.state.name == "ERROR"), None
-            )
-            if error_res:
-                msg = "; ".join(error_res.errors) if error_res.errors else ""
-                return f"ERROR\n{msg}" if msg else "ERROR"
-            fail_res = next(
-                (cr for cr in cell_results if cr.state.name == "FAILED"), None
-            )
-            if fail_res:
-                msg = "; ".join(fail_res.errors) if fail_res.errors else ""
-                return f"FAILED\n{msg}" if msg else "FAILED"
-            passed = any(cr.state.name == "PASSED" for cr in cell_results)
-            if passed:
-                return "PASSED"
-            any_state = (
-                cell_results[0].state.value
-                if hasattr(cell_results[0], "state")
-                else "UNKNOWN"
-            )
-            return any_state
-
-        cols = ["TestName"] + page_types
-
-        with open(output_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=cols)
-            writer.writeheader()
-
-            for test_name in test_names:
-                row: Dict[str, str] = {"TestName": test_name}
-                for pt in page_types:
-                    cell_results = grouped.get((test_name, pt), [])
-                    row[pt] = summarise(cell_results)
-                writer.writerow(row)
-
-            writer.writerow({})
-            writer.writerow({"TestName": "Page types (page_type -> URLs):"})
-            for pt in page_types:
-                urls_for_pt = sorted(pt_urls.get(pt, []))
-                if not urls_for_pt:
-                    continue
-                joined = "; ".join(urls_for_pt)
-                writer.writerow({"TestName": f"{pt}: {joined}"})
-
-        print(f"📄 Page-type summary written to: {output_path}")

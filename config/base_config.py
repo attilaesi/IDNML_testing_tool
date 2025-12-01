@@ -30,7 +30,7 @@ class TestConfig:
             "timeout": 30000,
             # Viewport – keep in sync with mobile flag for now
             "viewport": {"width": 390, "height": 844},
-            # "viewport": {"width": 1366, "height": 768},
+            #"viewport": {"width": 1366, "height": 768},
         }
 
         # Framework / test behaviour
@@ -39,7 +39,7 @@ class TestConfig:
             "max_pages": 10,
 
             # Run pages sequentially or in parallel
-            "parallel_tests": False,
+            "parallel_tests": True,
             "concurrency": 4,  # only used when parallel_tests=True
 
             # Debug / robustness settings
