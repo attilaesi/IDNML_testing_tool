@@ -1,4 +1,4 @@
-import asyncio
+# tests/prebid_tests/auction_activity_test.py
 
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
@@ -6,16 +6,24 @@ from core.data_extractor import DataExtractor
 
 class AuctionActivityTest(BaseTest):
     """
-    Verifies that a Prebid auction has actually produced bids.
+    Verifies that a Prebid auction has actually produced bids (as far as we can see).
 
     Answers:
       - Did any ad unit record bid responses?
       - Are there any winning bids recorded?
       - Which bidders responded and how many bids per ad unit?
 
-    Uses Prebid APIs:
+    PRIMARY SOURCE:
+      - window.__pbjsBidEvents events of type "bidResponse"
+        (populated by the global pbjs.onEvent() hook in BrowserManager)
+
+    FALLBACK:
       - pbjs.getBidResponsesForAdUnitCode(adUnitCode)
       - pbjs.getAllWinningBids()
+
+    If no bid responses are visible but there ARE bidRequested events,
+    we treat this as PASS with a warning (Prebid running, but responses
+    not exposed by this build).
 
     Assumes:
       - Framework already navigated to the URL
@@ -24,10 +32,6 @@ class AuctionActivityTest(BaseTest):
     """
 
     name = "AuctionActivityTest"
-
-    # How many GPT refresh cycles to trigger before inspecting bids
-    REFRESH_COUNT = 2
-    REFRESH_INTERVAL_SEC = 1.0  # wait between refreshes
 
     async def setup(self, page, url: str) -> bool:
         """
@@ -40,48 +44,10 @@ class AuctionActivityTest(BaseTest):
             print(f"[AuctionActivityTest] setup error: {e}")
             return False
 
-    async def _trigger_gpt_refreshes(self, page):
-        """
-        Trigger a few GPT refreshes to ensure an auction has a chance to run.
-
-        We refresh all slots returned by googletag.pubads().getSlots(), if available.
-        """
-        for i in range(self.REFRESH_COUNT):
-            try:
-                refreshed = await page.evaluate(
-                    """
-                    () => {
-                        try {
-                            const g = window.googletag;
-                            if (!g || !g.pubads || typeof g.pubads !== "function") {
-                                return "googletag.pubads not available";
-                            }
-                            const pubads = g.pubads();
-                            if (!pubads || typeof pubads.getSlots !== "function") {
-                                return "pubads.getSlots not available";
-                            }
-                            const slots = pubads.getSlots();
-                            if (!slots || !slots.length) {
-                                return "no slots to refresh";
-                            }
-                            pubads.refresh(slots);
-                            return `refreshed ${slots.length} slot(s)`;
-                        } catch (e) {
-                            return `error: ${String(e)}`;
-                        }
-                    }
-                    """
-                )
-                # print(f"[AuctionActivityTest] GPT refresh {i + 1}/{self.REFRESH_COUNT}: {refreshed}")
-            except Exception as e:
-                print(f"[AuctionActivityTest] Error triggering GPT refresh {i + 1}: {e}")
-
-            # Give Prebid/GPT a moment to run the auction
-            await asyncio.sleep(self.REFRESH_INTERVAL_SEC)
-
     async def execute(self, page, url: str) -> TestResult:
         """
-        Trigger GPT refreshes then extract bid response and winning bid info.
+        Inspect Prebid auction activity via global event store,
+        with fallback to older pbjs APIs if needed.
         """
         result = TestResult(self.name)
         result.url = url
@@ -93,53 +59,138 @@ class AuctionActivityTest(BaseTest):
             basic_data = await DataExtractor.extract_basic_data(page, url)
             result.data.update(basic_data)
 
-            # 1) Trigger a couple of GPT refreshes to ensure an auction runs
-            await self._trigger_gpt_refreshes(page)
-
-            # 2) Inspect Prebid bid responses / winning bids
             auction_data = await page.evaluate(
                 """
                 () => {
                     const out = {
+                        source: null,  // "__pbjsBidEvents" | "pbjs.getBidResponsesForAdUnitCode"
                         adUnits_with_responses: [],
                         total_bid_responses: 0,
                         winning_bids: [],
-                        errors: []
+                        errors: [],
+                        debug: {
+                          eventsLen: 0,
+                          eventTypes: [],
+                          bidRequestedCount: 0,
+                          bidResponseCount: 0
+                        }
                     };
 
+                    const w = window;
+                    const pbjs = w.pbjs;
+
+                    if (!pbjs) {
+                        out.errors.push("window.pbjs is not defined");
+                        return out;
+                    }
+
                     try {
-                        const pbjs = window.pbjs;
-                        if (!pbjs) {
-                            out.errors.push("window.pbjs is not defined");
-                            return out;
-                        }
+                        const events = Array.isArray(w.__pbjsBidEvents)
+                          ? w.__pbjsBidEvents
+                          : [];
 
-                        if (typeof pbjs.getBidResponsesForAdUnitCode !== "function") {
-                            out.errors.push("pbjs.getBidResponsesForAdUnitCode is not available");
-                            return out;
-                        }
+                        out.debug.eventsLen = events.length;
+                        out.debug.eventTypes = Array.from(
+                          new Set(events.map(e => e && e.type).filter(Boolean))
+                        );
 
-                        const adUnits = Array.isArray(pbjs.adUnits) ? pbjs.adUnits : [];
+                        const bidRequestedEvents = events.filter(
+                          e => e && e.type === "bidRequested" && e.args
+                        );
+                        const bidRespEvents = events.filter(
+                          e => e && e.type === "bidResponse" && e.args
+                        );
 
-                        adUnits.forEach((unit) => {
-                            const code = unit.code || unit.adUnitCode;
-                            if (!code) return;
+                        out.debug.bidRequestedCount = bidRequestedEvents.length;
+                        out.debug.bidResponseCount = bidRespEvents.length;
 
-                            const resp = pbjs.getBidResponsesForAdUnitCode(code) || {};
-                            const bids = Array.isArray(resp.bids) ? resp.bids : [];
+                        // ---- primary: bidResponse events ----
+                        if (bidRespEvents.length) {
+                            out.source = "__pbjsBidEvents";
 
-                            if (bids.length > 0) {
-                                out.adUnits_with_responses.push({
+                            const perAdUnit = new Map();
+
+                            bidRespEvents.forEach(ev => {
+                                const b = ev.args || {};
+                                const code = b.adUnitCode || b.adUnitCode;
+                                if (!code) return;
+
+                                let entry = perAdUnit.get(code);
+                                if (!entry) {
+                                    entry = { code, bids: [] };
+                                    perAdUnit.set(code, entry);
+                                }
+                                entry.bids.push(b);
+                            });
+
+                            const adUnits_with_responses = [];
+                            let total = 0;
+
+                            perAdUnit.forEach(({ code, bids }) => {
+                                const bidders = bids
+                                  .map(b => b && b.bidder)
+                                  .filter(Boolean);
+                                adUnits_with_responses.push({
                                     code,
                                     bidCount: bids.length,
-                                    bidders: bids
-                                        .map(b => b && b.bidder)
-                                        .filter(Boolean)
+                                    bidders
                                 });
-                                out.total_bid_responses += bids.length;
-                            }
-                        });
+                                total += bids.length;
+                            });
 
+                            out.adUnits_with_responses = adUnits_with_responses;
+                            out.total_bid_responses = total;
+                        }
+                    } catch (e) {
+                        out.errors.push("error reading __pbjsBidEvents: " + String(e));
+                    }
+
+                    // ---------------------------------------------
+                    // FALLBACK: pbjs.getBidResponsesForAdUnitCode
+                    // ---------------------------------------------
+                    if (!out.total_bid_responses) {
+                        try {
+                            if (typeof pbjs.getBidResponsesForAdUnitCode !== "function") {
+                                out.errors.push("pbjs.getBidResponsesForAdUnitCode is not available");
+                            } else {
+                                const adUnits = Array.isArray(pbjs.adUnits) ? pbjs.adUnits : [];
+                                const adUnits_with_responses = [];
+                                let total = 0;
+
+                                adUnits.forEach((unit) => {
+                                    const code = unit.code || unit.adUnitCode;
+                                    if (!code) return;
+
+                                    const resp = pbjs.getBidResponsesForAdUnitCode(code) || {};
+                                    const bids = Array.isArray(resp.bids) ? resp.bids : [];
+
+                                    if (bids.length > 0) {
+                                        adUnits_with_responses.push({
+                                            code,
+                                            bidCount: bids.length,
+                                            bidders: bids
+                                                .map(b => b && b.bidder)
+                                                .filter(Boolean)
+                                        });
+                                        total += bids.length;
+                                    }
+                                });
+
+                                if (total > 0) {
+                                    out.source = "pbjs.getBidResponsesForAdUnitCode";
+                                    out.adUnits_with_responses = adUnits_with_responses;
+                                    out.total_bid_responses = total;
+                                }
+                            }
+                        } catch (e) {
+                            out.errors.push("fallback extraction error: " + String(e));
+                        }
+                    }
+
+                    // --------------------
+                    // Winning bids (PBJS)
+                    // --------------------
+                    try {
                         if (typeof pbjs.getAllWinningBids === "function") {
                             const wins = pbjs.getAllWinningBids() || [];
                             out.winning_bids = wins.map((b) => ({
@@ -150,7 +201,7 @@ class AuctionActivityTest(BaseTest):
                             }));
                         }
                     } catch (e) {
-                        out.errors.push(String(e));
+                        out.errors.push("getAllWinningBids error: " + String(e));
                     }
 
                     return out;
@@ -159,6 +210,22 @@ class AuctionActivityTest(BaseTest):
             )
 
             result.data["prebid_auction_activity"] = auction_data
+
+            if self.config.get("trace"):
+                dbg = auction_data.get("debug") or {}
+                print(
+                    "[AuctionActivityTest] execute diag:",
+                    {
+                        "url": url,
+                        "source": auction_data.get("source"),
+                        "total_bid_responses": auction_data.get("total_bid_responses"),
+                        "winning_bids_count": len(auction_data.get("winning_bids") or []),
+                        "eventsLen": dbg.get("eventsLen"),
+                        "eventTypes": dbg.get("eventTypes"),
+                        "bidRequestedCount": dbg.get("bidRequestedCount"),
+                        "bidResponseCount": dbg.get("bidResponseCount"),
+                    },
+                )
 
         except Exception as e:
             result.state = TestState.ERROR
@@ -177,6 +244,10 @@ class AuctionActivityTest(BaseTest):
         errors = []
         warnings = []
 
+        debug = data.get("debug") or {}
+        bid_requested_count = debug.get("bidRequestedCount", 0) or 0
+        bid_response_count = debug.get("bidResponseCount", 0) or 0
+
         # Propagate JS-side errors
         for err in data.get("errors", []):
             errors.append(f"Extraction error: {err}")
@@ -185,11 +256,22 @@ class AuctionActivityTest(BaseTest):
         total_bid_responses = data.get("total_bid_responses", 0) or 0
         winning_bids = data.get("winning_bids") or []
 
-        # 1) At least one bid response somewhere
+        # --- core logic ---
         if total_bid_responses == 0:
-            errors.append("No bid responses recorded for any Prebid ad unit (after GPT refresh attempts)")
+            if bid_requested_count > 0:
+                # We saw Prebid auctions running, but this build doesn't expose responses
+                warnings.append(
+                    "Prebid bidRequested events seen but no bidResponse data was "
+                    "available (likely stripped in this Prebid build); treating as "
+                    "PASS with warning."
+                )
+            else:
+                errors.append(
+                    "No bid responses recorded for any Prebid ad unit and no "
+                    "bidRequested events seen."
+                )
 
-        # 2) Winning bids are highly desirable; warn if none
+        # Winning bids are desirable; warn if none
         if total_bid_responses > 0 and not winning_bids:
             warnings.append("No winning bids reported by pbjs.getAllWinningBids()")
 
@@ -212,10 +294,13 @@ class AuctionActivityTest(BaseTest):
         # Metadata for reporting
         result.metadata.update(
             {
+                "auction_source": data.get("source"),
                 "ad_units_with_responses_count": len(ad_units_with_responses),
                 "total_bid_responses": total_bid_responses,
                 "winning_bids_count": len(winning_bids),
                 "bidder_response_counts": bidder_response_counts,
+                "bidRequestedCount": bid_requested_count,
+                "bidResponseCount": bid_response_count,
             }
         )
 

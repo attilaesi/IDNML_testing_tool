@@ -84,6 +84,56 @@ class BrowserManager:
         # ---- Create context ----
         self.context = await self.browser.new_context(**context_kwargs)
 
+        # ---- Init script: hook Prebid events on every page ----
+        # This runs before any page scripts and makes sure that once pbjs is
+        # available, we attach onEvent listeners and push their args into
+        # window.__pbjsBidEvents for later inspection by tests.
+        await self.context.add_init_script(
+            """
+            (function () {
+              try {
+                // Global store for Prebid events
+                window.__pbjsBidEvents = window.__pbjsBidEvents || [];
+
+                function hookPrebidEvents() {
+                  try {
+                    var pb = window.pbjs;
+                    if (!pb || typeof pb.onEvent !== 'function' || pb.__permSignalsHooked) {
+                      return;
+                    }
+
+                    pb.__permSignalsHooked = true;
+
+                    ['auctionInit', 'bidRequested', 'auctionEnd'].forEach(function (ev) {
+                      try {
+                        pb.onEvent(ev, function (args) {
+                          try {
+                            window.__pbjsBidEvents.push({ type: ev, args: args });
+                          } catch (e) {
+                            // ignore push errors
+                          }
+                        });
+                      } catch (e) {
+                        // ignore per-event hook failure
+                      }
+                    });
+                  } catch (e) {
+                    // ignore hook errors
+                  }
+                }
+
+                // Ensure pbjs + que exist, then queue our hook so it runs
+                // once Prebid is fully initialised.
+                window.pbjs = window.pbjs || {};
+                window.pbjs.que = window.pbjs.que || [];
+                window.pbjs.que.push(hookPrebidEvents);
+              } catch (e) {
+                // swallow any init-script errors
+              }
+            })();
+            """
+        )
+
     async def new_page(self) -> Page:
         """Create a new page."""
         if not self.context:

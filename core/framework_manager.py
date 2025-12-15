@@ -257,6 +257,8 @@ class TestFramework:
 
     # ------------- Per-URL runner -------------
 
+        # ------------- Per-URL runner -------------
+
     async def _run_tests_for_url(
         self,
         page,
@@ -266,6 +268,97 @@ class TestFramework:
         total_urls: int,
         handle_cmp: bool,
     ) -> List[TestResult]:
+        """
+        Navigate to URL, prepare environment, run all tests, return results.
+
+        Logs are printed directly to stdout so you can see activity as it happens.
+        """
+        print(f"[{url_idx}/{total_urls}] Processing {url}")
+
+        # Inject credentials for UAT/DEV/feature branches if needed
+        auth_url = self._add_basic_auth_to_url(url)
+
+        # Set device + UAT/feature cookies before navigation
+        await self._set_context_cookies(page, auth_url)
+
+        # Navigate & wait for DOM
+        await page.goto(auth_url, wait_until="domcontentloaded")
+
+        # CMP only once per session / first URL (per mode)
+        if handle_cmp:
+            await self.cmp_handler.handle_consent(page)
+
+        # Wait until pbjs & GPT are fully ready (inc. GPT slotResponseReceived logic)
+        waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
+        await waiter.wait_for_prebid_and_gpt(page)
+
+        # Detect page type from GPT key-values (with small polling window)
+        page_type_norm = await self._detect_page_type(page)
+        print(f"[{url_idx}/{total_urls}] 🧩 Detected page type: {page_type_norm}")
+
+        # Detect locale from Locale cookie (UK / US)
+        locale = await self._detect_locale(page)
+        print(f"[{url_idx}/{total_urls}] 🗺️  Detected locale: {locale}")
+
+        # 🔸 Apply site test plan (inherit-all, then exclude by page type)
+        site_id = str(self.config.get("active_site", "independent")).lower()
+        site_plan = SITE_TEST_PLANS.get(site_id, {})
+
+        def _class_name(cls: Type[BaseTest]) -> str:
+            return getattr(cls, "name", cls.__name__)
+
+        if site_plan and site_plan.get("exclude") is not None:
+            excluded_site = set(site_plan.get("exclude", []))
+            exclude_map = site_plan.get("exclude_by_page_type", {}) or {}
+            excluded_pt = set(exclude_map.get(page_type_norm, []))
+
+            # Final disallowed set for this URL
+            disallowed = excluded_site | excluded_pt
+
+            # Only instantiate / run tests that are allowed for this URL
+            run_classes = [
+                cls for cls in test_classes if _class_name(cls) not in disallowed
+            ]
+        else:
+            # No site plan -> run everything discovered
+            run_classes = list(test_classes)
+
+        url_results: List[TestResult] = []
+
+        # Run each test for this URL (fresh instance per class)
+        for cls in run_classes:
+            test_name = _class_name(cls)
+            test = cls(self.config)
+
+            # Expose locale on the test instance so tests can read self.locale
+            try:
+                setattr(test, "locale", locale)
+            except Exception:
+                pass
+
+            try:
+                result = await test.run(page, url)
+
+                # Attach page_type and locale into metadata so tests/reporting can use it later
+                try:
+                    if hasattr(result, "metadata"):
+                        if result.metadata is None:
+                            result.metadata = {}
+                        if isinstance(result.metadata, dict):
+                            result.metadata.setdefault("page_type", page_type_norm)
+                            result.metadata.setdefault("locale", locale)
+                except Exception:
+                    pass
+
+                url_results.append(result)
+                print(f"[{url_idx}/{total_urls}]   {test_name}: {result.state.value}")
+            except Exception as e:
+                print(f"[{url_idx}/{total_urls}]   {test_name}: ERROR - {str(e)}")
+
+        left = total_urls - url_idx
+        print(f"[{url_idx}/{total_urls}] done, {left} left")
+
+        return url_results
         """
         Navigate to URL, prepare environment, run all tests, return results.
 

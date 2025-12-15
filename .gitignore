@@ -19,6 +19,7 @@ __pycache__/
 output.csv
 output_by_pagetype.csv
 import_independent_mappings.py
+env.local
 
 ###############################################################################
 # Directories that contain runtime artefacts — keep folder, ignore contents

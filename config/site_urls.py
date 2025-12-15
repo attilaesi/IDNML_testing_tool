@@ -10,11 +10,12 @@ SITE_PROFILES = {
             "https://www.independent.co.uk/news/world/europe/ukraine-russia-war-trump-putin-zelensky-pokrovsk-latest-news-b2863404.html",
         ],
         "uat_urls": [
-            "https://uat-web.independent.co.uk/news/test-test-test-nhl-las-vegas-marty-walsh-canada-ontario-b2823642.html",
-            "https://uat-web.independent.co.uk/news/test-test-test-chagos-diego-garcia-trump-legal-case-b2823645.html",
+            "https://uat-web.independent.co.uk/sport/football/belarus-scotland-live-stream-score-result-world-cup-qualifier-b2822194.html",
+            "https://uat-web.independent.co.uk/news/uk/home-news/golden-eagle-england-rsbp-b2809376.html",
             "https://uat-web.independent.co.uk/news/world/middle-east/qatar-explosion-israel-airstrike-hamas-doha-latest-news-b2823119.html",
             "https://uat-web.independent.co.uk/news/test-test-test-snp-kirsty-blackman-commons-mps-children-b2823608.html",
-            "https://uat-web.independent.co.uk/climate-change/news/shark-teeth-ocean-acidification-co2-b2814061.html"
+            "https://uat-web.independent.co.uk/climate-change/news/shark-teeth-ocean-acidification-co2-b2814061.html",
+            "https://uat-web.independent.co.uk/news/uk/home-news/food-hunger-crisis-britain-trussell-report-poverty-b2822926.html"
         ],
     },
 

@@ -25,12 +25,12 @@ class TestConfig:
         self.browser_config = {
             "headless": False,
             # For now this is the single switch; we’ll refactor to device_mode later
-            "mobile": True,
+            "mobile": False,
             # Playwright default timeout (ms)
             "timeout": 30000,
             # Viewport – keep in sync with mobile flag for now
-            "viewport": {"width": 390, "height": 844},
-            #"viewport": {"width": 1366, "height": 768},
+            #"viewport": {"width": 390, "height": 844},
+            "viewport": {"width": 1366, "height": 768},
         }
 
         # Framework / test behaviour
@@ -39,18 +39,18 @@ class TestConfig:
             "max_pages": 10,
 
             # Run pages sequentially or in parallel
-            "parallel_tests": True,
+            "parallel_tests": False,
             "concurrency": 4,  # only used when parallel_tests=True
 
             # Debug / robustness settings
             "debug_screenshots": False,   # CMP / failure screenshots
             "cmp_timeout": 3.0,          # seconds to wait for CMP dismiss
-            "prebid_ready_timeout": 10.0,  # seconds to wait for pbjs + GPT
+            "prebid_ready_timeout": 20.0,  # seconds to wait for pbjs + GPT
             "page_type_timeout": 3.0,      # seconds to poll for pageType
             "warmup_pages": 3,            # number of pages to run before testing start to generate third party API responses 
 
             # 🔸 Global trace switch for extra console logging in tests
-            "trace": False,
+            "trace": True,
         }
 
         # Output configuration
@@ -68,6 +68,7 @@ class TestConfig:
             {"name": "feat__ad_refresh",        "value": "true", "path": "/"},
             {"name": "feat__cmp_force_enable",  "value": "true", "path": "/"},
             {"name": "feat__primis_new_design", "value": "true", "path": "/"},
+            {"name": "feed", "value": "prod", "path": "/"},
         ]
 
     def get_config(self):
