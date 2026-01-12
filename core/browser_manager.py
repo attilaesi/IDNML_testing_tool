@@ -1,150 +1,266 @@
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Optional
 
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from playwright.async_api import async_playwright
 
 
 class BrowserManager:
-    def __init__(self, config: Dict[str, Any]):
+    """Handles browser launch, context creation, and page creation."""
+
+    def __init__(self, config: dict):
         self.config = config
-        self.browser: Optional[Browser] = None
-        self.context: Optional[BrowserContext] = None
         self.playwright = None
-
-    async def __aenter__(self):
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        await self.close()
+        self.browser = None
+        self.context = None
 
     async def start(self):
-        """Initialize Playwright, browser and context."""
+        """Launch browser and create a single shared context."""
         self.playwright = await async_playwright().start()
 
-        # ---- Launch browser ----
-        launch_options: Dict[str, Any] = {
-            "headless": self.config.get("headless", True),
-        }
-        if self.config.get("mobile", True):
-            # Helps window sizing for mobile emulation
-            launch_options["args"] = ["--window-size=390,844"]
+        browser_type = self.playwright.chromium
+        headless = bool(self.config.get("headless", True))
+        slow_mo = int(self.config.get("slow_mo", 0) or 0)
 
-        self.browser = await self.playwright.chromium.launch(**launch_options)
+        self.browser = await browser_type.launch(headless=headless, slow_mo=slow_mo)
 
-        # ---- Build context options (mobile / desktop) ----
-        context_kwargs: Dict[str, Any] = {}
+        is_mobile = bool(self.config.get("mobile", True))
 
-        if self.config.get("mobile", True):
-            # Try to use built-in device profile, fall back to manual settings
-            try:
-                device = self.playwright.devices["iPhone 14"]
-                context_kwargs.update(device)
-            except KeyError:
-                context_kwargs.update(
-                    {
-                        "user_agent": (
-                            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-                            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
-                            "Mobile/15A372 Safari/604.1"
-                        ),
-                        "viewport": {"width": 390, "height": 844},
-                        "device_scale_factor": 3,
-                        "is_mobile": True,
-                        "has_touch": True,
-                    }
-                )
+        # Default viewport & UA
+        if is_mobile:
+            viewport = {"width": 390, "height": 844}  # iPhone-ish
+            user_agent = (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
+                "Mobile/15E148 Safari/604.1"
+            )
         else:
-            # Simple desktop-like context
-            context_kwargs.update(
-                {
-                    "user_agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/115 Safari/537.36"
-                    ),
-                    "viewport": self.config.get(
-                        "viewport", {"width": 1280, "height": 720}
-                    ),
-                    "is_mobile": False,
-                    "has_touch": False,
-                }
+            viewport = {"width": 1365, "height": 768}
+            user_agent = (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
             )
 
-        # ---- Optional HTTP Basic Auth for UAT/DEV ----
-        if self.config.get("uat_mode", False):
-            context_kwargs["http_credentials"] = {
-                "username": "demo",
-                "password": "review",
-            }
-            print("🔐 UAT/DEV detected — HTTP basic auth enabled (demo/review)")
-        else:
-            print("🌐 LIVE mode — no HTTP auth required")
-
-        # ---- Create context ----
-        self.context = await self.browser.new_context(**context_kwargs)
+        self.context = await self.browser.new_context(
+            viewport=viewport,
+            user_agent=user_agent,
+        )
 
         # ---- Init script: hook Prebid events on every page ----
         # This runs before any page scripts and makes sure that once pbjs is
         # available, we attach onEvent listeners and push their args into
-        # window.__pbjsBidEvents for later inspection by tests.
+        # event stores for later inspection by tests.
         await self.context.add_init_script(
             """
             (function () {
               try {
-                // Global store for Prebid events
-                window.__pbjsBidEvents = window.__pbjsBidEvents || [];
+                // ------------------------------------------------------------
+                // Prebid event stores
+                //
+                // Keep the legacy combined store for backwards compatibility,
+                // but ALSO split into display vs video streams.
+                // ------------------------------------------------------------
+                window.__pbjsBidEvents = window.__pbjsBidEvents || [];                 // legacy: combined
+                window.__pbjsBidEventsDisplay = window.__pbjsBidEventsDisplay || [];   // new: display-only
+                window.__pbjsBidEventsVideo = window.__pbjsBidEventsVideo || [];       // new: video-only
 
-                function hookPrebidEvents() {
+                // Tiny meta snapshot to help verification/debugging.
+                window.__pbjsBidEventStoresMeta = window.__pbjsBidEventStoresMeta || {
+                  displayCount: 0,
+                  videoCount: 0,
+                  last: null
+                };
+
+                // Prevent double-hooking on repeated navigations in the same context
+                window.__pbjsEventHooked = window.__pbjsEventHooked || false;
+
+                // Hook Permutive signals too (existing behaviour)
+                window.__permSignalsHooked = window.__permSignalsHooked || false;
+
+                const isObject = (x) => x && typeof x === "object";
+
+                const isVideoBidLike = (bid) => {
                   try {
-                    var pb = window.pbjs;
-                    if (!pb || typeof pb.onEvent !== 'function' || pb.__permSignalsHooked) {
-                      return;
+                    if (!bid) return false;
+
+                    const adUnitCode = bid.adUnitCode != null ? String(bid.adUnitCode).toLowerCase() : "";
+                    if (adUnitCode === "hero_player") return true;
+
+                    const mt = isObject(bid.mediaTypes) ? bid.mediaTypes : null;
+                    const video = mt && isObject(mt.video) ? mt.video : null;
+                    if (video) return true;
+
+                    const ortb2Imp = isObject(bid.ortb2Imp) ? bid.ortb2Imp : null;
+                    const impVideo = ortb2Imp && isObject(ortb2Imp.video) ? ortb2Imp.video : null;
+                    if (impVideo) return true;
+
+                    return false;
+                  } catch (e) {
+                    return false;
+                  }
+                };
+
+                const isVideoAdUnitLike = (u) => {
+                  try {
+                    if (!u) return false;
+
+                    const code = u.code != null ? String(u.code).toLowerCase() : "";
+                    if (code === "hero_player") return true;
+
+                    const mt = isObject(u.mediaTypes) ? u.mediaTypes : null;
+                    const video = mt && isObject(mt.video) ? mt.video : null;
+                    if (video) return true;
+
+                    return false;
+                  } catch (e) {
+                    return false;
+                  }
+                };
+
+                const classifyEventStream = (type, args) => {
+                  try {
+                    if (!type) return "display";
+
+                    // Most reliable: bidRequested has a bids array
+                    if (type === "bidRequested" && args) {
+                      const bids = Array.isArray(args.bids) ? args.bids : [];
+                      return bids.some(isVideoBidLike) ? "video" : "display";
                     }
 
-                    pb.__permSignalsHooked = true;
+                    // auctionInit often includes adUnits
+                    if (type === "auctionInit" && args) {
+                      const aus = Array.isArray(args.adUnits) ? args.adUnits : [];
+                      return aus.some(isVideoAdUnitLike) ? "video" : "display";
+                    }
 
-                    ['auctionInit', 'bidRequested', 'auctionEnd'].forEach(function (ev) {
+                    // auctionEnd may include adUnits / bidsReceived depending on stack
+                    if (type === "auctionEnd" && args) {
+                      const aus = Array.isArray(args.adUnits) ? args.adUnits : [];
+                      if (aus.some(isVideoAdUnitLike)) return "video";
+
+                      const bidsRec = Array.isArray(args.bidsReceived) ? args.bidsReceived : [];
+                      if (bidsRec.some(isVideoBidLike)) return "video";
+                    }
+                  } catch (e) {
+                    // ignore
+                  }
+                  return "display";
+                };
+
+                const pushEvent = (ev) => {
+                  try {
+                    // Legacy combined store (keep existing tests working)
+                    window.__pbjsBidEvents.push(ev);
+
+                    // Split store
+                    if (ev.stream === "video") {
+                      window.__pbjsBidEventsVideo.push(ev);
+                      window.__pbjsBidEventStoresMeta.videoCount += 1;
+                    } else {
+                      window.__pbjsBidEventsDisplay.push(ev);
+                      window.__pbjsBidEventStoresMeta.displayCount += 1;
+                    }
+
+                    window.__pbjsBidEventStoresMeta.last = {
+                      type: ev.type,
+                      stream: ev.stream,
+                      t: Date.now()
+                    };
+                  } catch (e) {
+                    // ignore
+                  }
+                };
+
+                // Poll until pbjs exists, then attach listeners once
+                const hookPbjs = () => {
+                  try {
+                    if (!window.pbjs || typeof window.pbjs.onEvent !== "function") return false;
+                    if (window.__pbjsEventHooked) return true;
+
+                    window.__pbjsEventHooked = true;
+
+                    const eventsToHook = [
+                      "auctionInit",
+                      "bidRequested",
+                      "bidResponse",
+                      "bidWon",
+                      "auctionEnd",
+                    ];
+
+                    eventsToHook.forEach((type) => {
                       try {
-                        pb.onEvent(ev, function (args) {
-                          try {
-                            window.__pbjsBidEvents.push({ type: ev, args: args });
-                          } catch (e) {
-                            // ignore push errors
-                          }
+                        window.pbjs.onEvent(type, function (args) {
+                          const stream = classifyEventStream(type, args);
+                          pushEvent({
+                            type,
+                            stream,
+                            args,
+                            ts: Date.now(),
+                          });
                         });
                       } catch (e) {
-                        // ignore per-event hook failure
+                        // ignore
                       }
                     });
-                  } catch (e) {
-                    // ignore hook errors
-                  }
-                }
 
-                // Ensure pbjs + que exist, then queue our hook so it runs
-                // once Prebid is fully initialised.
-                window.pbjs = window.pbjs || {};
-                window.pbjs.que = window.pbjs.que || [];
-                window.pbjs.que.push(hookPrebidEvents);
+                    // Optional: hook Permutive once (existing behaviour)
+                    try {
+                      if (!window.__permSignalsHooked && window.permutive && window.permutive.addon) {
+                        window.__permSignalsHooked = true;
+                      }
+                    } catch (e) {}
+
+                    return true;
+                  } catch (e) {
+                    return false;
+                  }
+                };
+
+                // Try immediately, then poll for up to ~15s
+                if (!hookPbjs()) {
+                  let tries = 0;
+                  const maxTries = 60; // 60 * 250ms = 15s
+                  const t = setInterval(() => {
+                    tries++;
+                    if (hookPbjs() || tries >= maxTries) {
+                      clearInterval(t);
+                    }
+                  }, 250);
+                }
               } catch (e) {
-                // swallow any init-script errors
+                // ignore top-level errors
               }
             })();
             """
         )
 
-    async def new_page(self) -> Page:
-        """Create a new page."""
+    async def new_page(self):
+        """Create a new page in the shared context."""
         if not self.context:
-            await self.start()
-        return await self.context.new_page()
+            raise RuntimeError("Browser context not started. Call start() first.")
+        page = await self.context.new_page()
+        return page
 
     async def close(self):
-        """Close browser and cleanup."""
-        if self.browser:
-            await self.browser.close()
-            self.browser = None
-        if self.playwright:
-            await self.playwright.stop()
-            self.playwright = None
+        """Close context and browser cleanly."""
+        try:
+            if self.context:
+                await self.context.close()
+        except Exception:
+            pass
+
+        try:
+            if self.browser:
+                await self.browser.close()
+        except Exception:
+            pass
+
+        try:
+            if self.playwright:
+                await self.playwright.stop()
+        except Exception:
+            pass
+
+        self.playwright = None
+        self.browser = None
+        self.context = None

@@ -82,6 +82,7 @@ async def main():
                 for entry in msgs:
                     for line in str(entry).splitlines():
                         print("         - " + line)
+        print("===============================================================================")
 
     print()  # final newline
 
