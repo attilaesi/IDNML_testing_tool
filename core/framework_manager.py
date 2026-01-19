@@ -187,6 +187,88 @@ class TestFramework:
 
         return "unknown"
 
+    # ------------- Global context trace helpers -------------
+
+    def _env_from_url(self, url: str) -> str:
+        """
+        Infer env from URL (since we don't rely on config['env'] or an env cookie).
+        """
+        u = (url or "").lower()
+        if any(t in u for t in ("uat", "feat", "dev")):
+            return "uat"
+        return "prod"
+
+    async def _detect_liveblog(self, page) -> str:
+        """
+        Read GPT targeting key 'liveblog' (best-effort).
+        """
+        js = """
+        () => {
+          try {
+            if (!window.googletag || !googletag.pubads) return "";
+            const pubads = googletag.pubads();
+            if (!pubads || !pubads.getTargeting) return "";
+            const v = pubads.getTargeting("liveblog");
+            return (v && v[0]) ? String(v[0]).toLowerCase() : "";
+          } catch (e) {
+            return "";
+          }
+        }
+        """
+        try:
+            return (await page.evaluate(js)) or ""
+        except Exception:
+            return ""
+
+    def _map_pagetype_to_db(self, page_type: str, liveblog: str) -> str:
+        """
+        Map GPT pageType + liveblog targeting into DB page_type values.
+        """
+        pt = (page_type or "").strip().lower()
+        lb = (liveblog or "").strip().lower()
+
+        if pt == "index":
+            return "index"
+
+        if pt == "video":
+            if lb in ("y", "yes", "true", "1"):
+                return "blog_article"
+            return "video_article"
+
+        if pt == "image":
+            return "image_article"
+
+        if pt == "gallery":
+            return "gallery_article"
+
+        return pt or "unknown"
+
+    async def _get_event_store_counts(self, page) -> Dict[str, int]:
+        """
+        Count events in display/video global stores so we can *verify* capture.
+        """
+        js = """
+        () => {
+          const d = Array.isArray(window.__pbjsBidEventsDisplay) ? window.__pbjsBidEventsDisplay : [];
+          const v = Array.isArray(window.__pbjsBidEventsVideo) ? window.__pbjsBidEventsVideo : [];
+          const dbr = d.filter(e => e && e.type === "bidRequested").length;
+          const vbr = v.filter(e => e && e.type === "bidRequested").length;
+          return {
+            displayEvents: d.length,
+            videoEvents: v.length,
+            displayBidReq: dbr,
+            videoBidReq: vbr
+          };
+        }
+        """
+        try:
+            out = await page.evaluate(js)
+            if isinstance(out, dict):
+                return out
+        except Exception:
+            pass
+        return {"displayEvents": 0, "videoEvents": 0, "displayBidReq": 0, "videoBidReq": 0}
+
     # ------------- Test discovery -------------
 
     def discover_tests(self) -> None:
@@ -257,8 +339,6 @@ class TestFramework:
 
     # ------------- Per-URL runner -------------
 
-        # ------------- Per-URL runner -------------
-
     async def _run_tests_for_url(
         self,
         page,
@@ -288,7 +368,7 @@ class TestFramework:
         if handle_cmp:
             await self.cmp_handler.handle_consent(page)
 
-        # Wait until pbjs & GPT are fully ready (inc. GPT slotResponseReceived logic)
+        # Wait until pbjs & GPT are fully ready
         waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
         await waiter.wait_for_prebid_and_gpt(page)
 
@@ -300,6 +380,38 @@ class TestFramework:
         locale = await self._detect_locale(page)
         print(f"[{url_idx}/{total_urls}] 🗺️  Detected locale: {locale}")
 
+        # ---- GLOBAL CONTEXT TRACE (one line per URL; very useful for bidder presence debugging) ----
+        liveblog = await self._detect_liveblog(page)
+        db_page_type = self._map_pagetype_to_db(page_type_norm, liveblog)
+        env = self._env_from_url(auth_url or url)
+        device = "mobile" if self.config.get("mobile", True) else "desktop"
+        geo = (locale or "UK").strip().lower()
+        publisher = str(self.config.get("active_site", "independent")).lower()
+        counts = await self._get_event_store_counts(page)
+
+        context_summary = {
+            "publisher": publisher,
+            "env": env,
+            "device": device,
+            "geo": geo,
+            "gpt_page_type": page_type_norm,
+            "liveblog": (liveblog or "n/a"),
+            "db_page_type": db_page_type,
+            "displayEvents": counts.get("displayEvents", 0),
+            "videoEvents": counts.get("videoEvents", 0),
+            "displayBidReq": counts.get("displayBidReq", 0),
+            "videoBidReq": counts.get("videoBidReq", 0),
+        }
+
+        print(
+            f"[{url_idx}/{total_urls}] 🔎 Context: "
+            f"publisher={publisher} env={env} device={device} geo={geo} "
+            f"gpt_page_type={page_type_norm} liveblog={(liveblog or 'n/a')} "
+            f"db_page_type={db_page_type} "
+            f"displayEvents={counts.get('displayEvents')} videoEvents={counts.get('videoEvents')} "
+            f"displayBidReq={counts.get('displayBidReq')} videoBidReq={counts.get('videoBidReq')}"
+        )
+
         # 🔸 Apply site test plan (inherit-all, then exclude by page type)
         site_id = str(self.config.get("active_site", "independent")).lower()
         site_plan = SITE_TEST_PLANS.get(site_id, {})
@@ -339,7 +451,7 @@ class TestFramework:
             try:
                 result = await test.run(page, url)
 
-                # Attach page_type and locale into metadata so tests/reporting can use it later
+                # Attach page_type, locale and GLOBAL CONTEXT TRACE into metadata
                 try:
                     if hasattr(result, "metadata"):
                         if result.metadata is None:
@@ -347,6 +459,7 @@ class TestFramework:
                         if isinstance(result.metadata, dict):
                             result.metadata.setdefault("page_type", page_type_norm)
                             result.metadata.setdefault("locale", locale)
+                            result.metadata.setdefault("context_summary", context_summary)
                 except Exception:
                     pass
 
@@ -357,119 +470,6 @@ class TestFramework:
 
         left = total_urls - url_idx
         print(f"[{url_idx}/{total_urls}] done, {left} left")
-
-        return url_results
-        """
-        Navigate to URL, prepare environment, run all tests, return results.
-
-        All logging for this URL is buffered and printed as a single
-        grouped block (helps readability when running in parallel).
-        """
-        # Per-URL log buffer
-        log: List[str] = []
-
-        def logprint(*args):
-            msg = " ".join(str(a) for a in args)
-            log.append(msg)
-
-        logprint(f"[{url_idx}/{total_urls}] Processing {url}")
-
-        # Inject credentials for UAT/DEV/feature branches if needed
-        auth_url = self._add_basic_auth_to_url(url)
-
-        # Set device + UAT/feature cookies before navigation
-        await self._set_context_cookies(page, auth_url)
-
-        # Navigate & wait for DOM
-        await page.goto(auth_url, wait_until="domcontentloaded")
-
-        # CMP only once per session / first URL (per mode)
-        if handle_cmp:
-            await self.cmp_handler.handle_consent(page)
-
-        # Wait until pbjs & GPT are fully ready (inc. GPT slotResponseReceived logic)
-        waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
-        await waiter.wait_for_prebid_and_gpt(page)
-
-        # Detect page type from GPT key-values (with small polling window)
-        page_type_norm = await self._detect_page_type(page)
-        logprint(f"🧩 Detected page type: {page_type_norm}")
-
-        # Detect locale from Locale cookie (UK / US)
-        locale = await self._detect_locale(page)
-        logprint(f"🗺️  Detected locale: {locale}")
-
-        # 🔸 Apply site test plan (inherit-all, then exclude by page type)
-        site_id = str(self.config.get("active_site", "independent")).lower()
-        site_plan = SITE_TEST_PLANS.get(site_id, {})
-
-        def _class_name(cls: Type[BaseTest]) -> str:
-            return getattr(cls, "name", cls.__name__)
-
-        if site_plan and site_plan.get("exclude") is not None:
-            excluded_site = set(site_plan.get("exclude", []))
-            exclude_map = site_plan.get("exclude_by_page_type", {}) or {}
-            excluded_pt = set(exclude_map.get(page_type_norm, []))
-
-            # Final disallowed set for this URL
-            disallowed = excluded_site | excluded_pt
-
-            # Only instantiate / run tests that are allowed for this URL
-            run_classes = [
-                cls for cls in test_classes if _class_name(cls) not in disallowed
-            ]
-        else:
-            # No site plan -> run everything discovered
-            run_classes = list(test_classes)
-
-        url_results: List[TestResult] = []
-
-        # Run each test for this URL (fresh instance per class)
-        for cls in run_classes:
-            test_name = _class_name(cls)
-            test = cls(self.config)
-
-            # Expose locale on the test instance so tests can read self.locale
-            try:
-                setattr(test, "locale", locale)
-            except Exception:
-                pass
-
-            try:
-                result = await test.run(page, url)
-
-                # Attach page_type and locale into metadata so tests/reporting can use it later
-                try:
-                    if hasattr(result, "metadata"):
-                        if result.metadata is None:
-                            result.metadata = {}
-                        if isinstance(result.metadata, dict):
-                            result.metadata.setdefault("page_type", page_type_norm)
-                            result.metadata.setdefault("locale", locale)
-                except Exception:
-                    pass
-
-                url_results.append(result)
-                logprint(f"  {test_name}: {result.state.value}")
-            except Exception as e:
-                logprint(f"  {test_name}: ERROR - {str(e)}")
-
-        left = total_urls - url_idx
-        logprint(f"[{url_idx}/{total_urls}] done, {left} left")
-
-        # Flush the buffered log as a single block so parallel runs don't interleave
-        block_lines = [
-            "",
-            "=" * 80,
-            f"📄 RESULT BLOCK FOR URL {url_idx}/{total_urls}",
-            url,
-            "=" * 80,
-        ]
-        block_lines.extend(log)
-        block_lines.append("=" * 80)
-        block_lines.append("")
-
-        print("\n".join(block_lines))
 
         return url_results
 

@@ -50,19 +50,19 @@ class BrowserManager:
         # This runs before any page scripts and makes sure that once pbjs is
         # available, we attach onEvent listeners and push their args into
         # event stores for later inspection by tests.
+        #
+        # IMPORTANT: "Video" stream here means HERO PLAYER stream (adUnitCode/code == hero_player),
+        # NOT "anything with mediaTypes.video".
         await self.context.add_init_script(
             """
             (function () {
               try {
                 // ------------------------------------------------------------
                 // Prebid event stores
-                //
-                // Keep the legacy combined store for backwards compatibility,
-                // but ALSO split into display vs video streams.
                 // ------------------------------------------------------------
                 window.__pbjsBidEvents = window.__pbjsBidEvents || [];                 // legacy: combined
-                window.__pbjsBidEventsDisplay = window.__pbjsBidEventsDisplay || [];   // new: display-only
-                window.__pbjsBidEventsVideo = window.__pbjsBidEventsVideo || [];       // new: video-only
+                window.__pbjsBidEventsDisplay = window.__pbjsBidEventsDisplay || [];   // display stream (everything NOT hero_player)
+                window.__pbjsBidEventsVideo = window.__pbjsBidEventsVideo || [];       // hero_player stream only
 
                 // Tiny meta snapshot to help verification/debugging.
                 window.__pbjsBidEventStoresMeta = window.__pbjsBidEventStoresMeta || {
@@ -74,44 +74,33 @@ class BrowserManager:
                 // Prevent double-hooking on repeated navigations in the same context
                 window.__pbjsEventHooked = window.__pbjsEventHooked || false;
 
-                // Hook Permutive signals too (existing behaviour)
-                window.__permSignalsHooked = window.__permSignalsHooked || false;
+                const HERO_CODES = new Set(["hero_player"]);
 
-                const isObject = (x) => x && typeof x === "object";
+                const norm = (x) => {
+                  try { return (x == null ? "" : String(x)).trim().toLowerCase(); }
+                  catch (e) { return ""; }
+                };
 
-                const isVideoBidLike = (bid) => {
+                const isHeroCode = (code) => HERO_CODES.has(norm(code));
+
+                const isHeroBidLike = (bid) => {
                   try {
                     if (!bid) return false;
-
-                    const adUnitCode = bid.adUnitCode != null ? String(bid.adUnitCode).toLowerCase() : "";
-                    if (adUnitCode === "hero_player") return true;
-
-                    const mt = isObject(bid.mediaTypes) ? bid.mediaTypes : null;
-                    const video = mt && isObject(mt.video) ? mt.video : null;
-                    if (video) return true;
-
-                    const ortb2Imp = isObject(bid.ortb2Imp) ? bid.ortb2Imp : null;
-                    const impVideo = ortb2Imp && isObject(ortb2Imp.video) ? ortb2Imp.video : null;
-                    if (impVideo) return true;
-
-                    return false;
+                    // For bidRequested, bid objects commonly have adUnitCode
+                    // For some stacks, it may be code
+                    const adUnitCode = norm(bid.adUnitCode || bid.code);
+                    return isHeroCode(adUnitCode);
                   } catch (e) {
                     return false;
                   }
                 };
 
-                const isVideoAdUnitLike = (u) => {
+                const isHeroAdUnitLike = (u) => {
                   try {
                     if (!u) return false;
-
-                    const code = u.code != null ? String(u.code).toLowerCase() : "";
-                    if (code === "hero_player") return true;
-
-                    const mt = isObject(u.mediaTypes) ? u.mediaTypes : null;
-                    const video = mt && isObject(mt.video) ? mt.video : null;
-                    if (video) return true;
-
-                    return false;
+                    // For auctionInit, adUnits commonly have code
+                    const code = norm(u.code || u.adUnitCode);
+                    return isHeroCode(code);
                   } catch (e) {
                     return false;
                   }
@@ -124,22 +113,28 @@ class BrowserManager:
                     // Most reliable: bidRequested has a bids array
                     if (type === "bidRequested" && args) {
                       const bids = Array.isArray(args.bids) ? args.bids : [];
-                      return bids.some(isVideoBidLike) ? "video" : "display";
+                      return bids.some(isHeroBidLike) ? "video" : "display";
                     }
 
                     // auctionInit often includes adUnits
                     if (type === "auctionInit" && args) {
                       const aus = Array.isArray(args.adUnits) ? args.adUnits : [];
-                      return aus.some(isVideoAdUnitLike) ? "video" : "display";
+                      return aus.some(isHeroAdUnitLike) ? "video" : "display";
                     }
 
                     // auctionEnd may include adUnits / bidsReceived depending on stack
                     if (type === "auctionEnd" && args) {
                       const aus = Array.isArray(args.adUnits) ? args.adUnits : [];
-                      if (aus.some(isVideoAdUnitLike)) return "video";
+                      if (aus.some(isHeroAdUnitLike)) return "video";
 
                       const bidsRec = Array.isArray(args.bidsReceived) ? args.bidsReceived : [];
-                      if (bidsRec.some(isVideoBidLike)) return "video";
+                      if (bidsRec.some(isHeroBidLike)) return "video";
+                    }
+
+                    // bidResponse / bidWon sometimes include adUnitCode directly
+                    if ((type === "bidResponse" || type === "bidWon") && args) {
+                      // args can be a single bid object in many prebid builds
+                      return isHeroBidLike(args) ? "video" : "display";
                     }
                   } catch (e) {
                     // ignore
@@ -202,13 +197,6 @@ class BrowserManager:
                         // ignore
                       }
                     });
-
-                    // Optional: hook Permutive once (existing behaviour)
-                    try {
-                      if (!window.__permSignalsHooked && window.permutive && window.permutive.addon) {
-                        window.__permSignalsHooked = true;
-                      }
-                    } catch (e) {}
 
                     return true;
                   } catch (e) {

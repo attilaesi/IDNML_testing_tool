@@ -56,6 +56,7 @@ async def main():
     for idx, (url, url_results) in enumerate(results_by_url.items(), start=1):
         # Derive pageType if present
         page_type = url_results[0].metadata.get("page_type", "unknown")
+        ctx = (url_results[0].metadata or {}).get("context_summary") or {}
 
         passed_u = sum(1 for r in url_results if r.state == TestState.PASSED)
         failed_u = sum(1 for r in url_results if r.state == TestState.FAILED)
@@ -63,6 +64,16 @@ async def main():
 
         print(f"\n🔹 URL {idx}/{len(results_by_url)}")
         print(f"   {url}   (pageType: {page_type})")
+        if ctx:
+            print(
+                "   🔎 Context: "
+                f"publisher={ctx.get('publisher')} env={ctx.get('env')} "
+                f"device={ctx.get('device')} geo={ctx.get('geo')} "
+                f"gpt_page_type={ctx.get('gpt_page_type')} liveblog={ctx.get('liveblog')} "
+                f"db_page_type={ctx.get('db_page_type')} "
+                f"displayEvents={ctx.get('displayEvents')} videoEvents={ctx.get('videoEvents')} "
+                f"displayBidReq={ctx.get('displayBidReq')} videoBidReq={ctx.get('videoBidReq')}"
+            )
         print(f"   Total executed tests: {len(url_results)}")
         print(f"   ✅ Passed:  {passed_u}")
         print(f"   ❌ Failed:  {failed_u}")
