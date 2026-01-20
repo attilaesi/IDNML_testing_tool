@@ -14,7 +14,8 @@ from core.framework_manager import TestFramework
 
 async def main():
     print("🚀 Ad Testing Framework")
-    print(f"Site: {CONFIG.get('site_url', CONFIG.get('SITE_URL', ''))}")
+    print(f"Active site: {CONFIG.get('active_site', '')}")
+    print(f"Site URL: {CONFIG.get('site_url', '')}")
     print(f"Max pages: {CONFIG.get('max_pages', 10)}")
     print(f"Mobile mode: {CONFIG.get('mobile', False)}")
     print(f"Headless: {CONFIG.get('headless', True)}")

@@ -50,6 +50,7 @@ PASSED:
 from typing import Any, Dict, List, Set
 import os
 import aiohttp
+from urllib.parse import urlparse
 
 from core.base_test import BaseTest, TestResult, TestState
 
@@ -75,8 +76,22 @@ def _map_pagetype_to_db(page_type: str, liveblog: str) -> str:
     return pt or "unknown"
 
 
+def _publisher_from_url(url: str) -> str:
+    host = (urlparse(url or "").hostname or "").lower()
+    if host.endswith("independent.co.uk"):
+        return "independent"
+    if host.endswith("standard.co.uk"):
+        return "standard"
+    return "unknown"
+
+
 def _env_from_url(url: str) -> str:
+    """
+    staging is treated as uat (same bidders/cookies/auth per requirements)
+    """
     u = (url or "").lower()
+    if "staging" in u:
+        return "uat"
     if any(token in u for token in ("uat", "feat", "dev")):
         return "uat"
     return "prod"
@@ -334,7 +349,7 @@ class VideoBidderPresenceTest(BaseTest):
         liveblog = diag.get("liveblog") or ""
         db_page_type = _map_pagetype_to_db(gpt_page_type, liveblog)
 
-        publisher = str(self.config.get("active_site", "independent")).lower()
+        publisher = _publisher_from_url(result.url)
         device = "mobile" if self.config.get("mobile", True) else "desktop"
         geo = locale.lower()
         environment = _env_from_url(result.url)

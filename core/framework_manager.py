@@ -32,22 +32,42 @@ class TestFramework:
 
     # ------------- URL helpers -------------
 
+    def _is_preprod_url(self, url: str) -> bool:
+        """
+        Preprod environments should behave the same for:
+          - UAT (uat/feat/dev)
+          - staging (staging)
+        """
+        u = (url or "").lower()
+        return any(t in u for t in ("uat", "feat", "dev", "staging"))
+
+    def _publisher_from_url(self, url: str) -> str:
+        """
+        Derive publication (publisher) from URL host.
+        This must NOT use active_site because active_site can be:
+          independent_uat / independent_staging
+        but publisher in DB remains: independent.
+        """
+        host = (urlparse(url or "").hostname or "").lower()
+
+        if host.endswith("independent.co.uk"):
+            return "independent"
+        if host.endswith("standard.co.uk"):
+            return "standard"
+
+        # fallback: keep existing behaviour as last resort
+        return str(self.config.get("active_site", "independent")).lower()
+
     def _add_basic_auth_to_url(self, url: str) -> str:
         """
-        If URL points to a UAT/DEV/FEAT environment, inject basic auth credentials
+        If URL points to a UAT/DEV/FEAT/STAGING environment, inject basic auth credentials
         like: https://demo:review@uat-web.independent.co.uk/...
         """
         if not url:
             return url
 
-        url_l = url.lower()
-
-        # Treat any host containing 'uat', 'feat', or 'dev' as pre-prod
-        is_preprod_url = any(token in url_l for token in ("uat", "feat", "dev"))
-        is_forced_uat = bool(self.config.get("uat_mode", False))
-
-        # Only apply if clearly pre-prod OR uat_mode is explicitly enabled
-        if not (is_preprod_url or is_forced_uat):
+        # Only apply if clearly pre-prod
+        if not self._is_preprod_url(url):
             return url
 
         username = "demo"
@@ -65,7 +85,7 @@ class TestFramework:
 
         parsed = parsed._replace(netloc=f"{username}:{password}@{netloc}")
         auth_url = urlunparse(parsed)
-        print(f"🔐 Injected basic auth into URL for pre-prod (uat/feat/dev): {auth_url}")
+        print(f"🔐 Injected basic auth into URL for pre-prod (uat/feat/dev/staging): {auth_url}")
         return auth_url
 
     async def _set_context_cookies(self, page, url: str) -> None:
@@ -75,21 +95,18 @@ class TestFramework:
         Always:
           - is_mobile_or_tablet
 
-        For pre-prod (UAT / FEAT / DEV):
-          - feature flag cookies from config['uat_cookies']
+        For pre-prod (UAT / FEAT / DEV / STAGING):
+          - feature flag cookies from config['preprod_cookies']
         """
         is_mobile = bool(self.config.get("mobile", True))
-        uat_cookies = self.config.get("uat_cookies", [])
+        preprod_cookies = self.config.get("preprod_cookies", [])
 
         raw = url or self.config.get("site_url", "")
         parsed = urlparse(raw if raw else "https://www.independent.co.uk")
         host = parsed.hostname or "www.independent.co.uk"
         domain = host  # host-only cookie
 
-        raw_l = (raw or "").lower()
-        # Pre-prod if URL contains uat/feat/dev OR global uat_mode is set
-        is_preprod_url = any(token in raw_l for token in ("uat", "feat", "dev"))
-        uat_mode = bool(self.config.get("uat_mode", False) or is_preprod_url)
+        is_preprod = self._is_preprod_url(raw)
 
         cookies = [
             {
@@ -100,8 +117,8 @@ class TestFramework:
             }
         ]
 
-        if uat_mode and uat_cookies:
-            for base_cookie in uat_cookies:
+        if is_preprod and preprod_cookies:
+            for base_cookie in preprod_cookies:
                 c = dict(base_cookie)           # shallow copy
                 c.setdefault("domain", domain)  # apply current host if not set
                 cookies.append(c)
@@ -109,7 +126,7 @@ class TestFramework:
         try:
             await page.context.add_cookies(cookies)
             print(
-                f"🌍 Context cookies set (mobile={is_mobile}, preprod={uat_mode}): "
+                f"🌍 Context cookies set (mobile={is_mobile}, preprod={is_preprod}): "
                 f"{[c['name'] + '=' + c['value'] for c in cookies]}"
             )
         except Exception as e:
@@ -191,9 +208,12 @@ class TestFramework:
 
     def _env_from_url(self, url: str) -> str:
         """
-        Infer env from URL (since we don't rely on config['env'] or an env cookie).
+        Infer env from URL.
+        IMPORTANT: staging is treated as uat (same cookies/auth and same bidders).
         """
         u = (url or "").lower()
+        if "staging" in u:
+            return "uat"
         if any(t in u for t in ("uat", "feat", "dev")):
             return "uat"
         return "prod"
@@ -297,10 +317,10 @@ class TestFramework:
         urls = list(self.config.get("urls", []))
         if not urls:
             print("⚠️ No URLs configured. Check config/site_urls.py and base_config.py")
+
         print(
             f"🧭 Using {len(urls)} URLs from site profile "
-            f"({self.config.get('active_site')} | "
-            f"{'UAT' if self.config.get('uat_mode') else 'LIVE'})"
+            f"({self.config.get('active_site')})"
         )
         return urls
 
@@ -355,10 +375,10 @@ class TestFramework:
         """
         print(f"[{url_idx}/{total_urls}] Processing {url}")
 
-        # Inject credentials for UAT/DEV/feature branches if needed
+        # Inject credentials for UAT/DEV/feature branches/staging if needed
         auth_url = self._add_basic_auth_to_url(url)
 
-        # Set device + UAT/feature cookies before navigation
+        # Set device + preprod feature cookies before navigation
         await self._set_context_cookies(page, auth_url)
 
         # Navigate & wait for DOM
@@ -386,7 +406,7 @@ class TestFramework:
         env = self._env_from_url(auth_url or url)
         device = "mobile" if self.config.get("mobile", True) else "desktop"
         geo = (locale or "UK").strip().lower()
-        publisher = str(self.config.get("active_site", "independent")).lower()
+        publisher = self._publisher_from_url(auth_url or url)
         counts = await self._get_event_store_counts(page)
 
         context_summary = {
@@ -413,8 +433,8 @@ class TestFramework:
         )
 
         # 🔸 Apply site test plan (inherit-all, then exclude by page type)
-        site_id = str(self.config.get("active_site", "independent")).lower()
-        site_plan = SITE_TEST_PLANS.get(site_id, {})
+        # IMPORTANT: site plans are keyed by publisher, not by active_site variants
+        site_plan = SITE_TEST_PLANS.get(publisher, {})
 
         def _class_name(cls: Type[BaseTest]) -> str:
             return getattr(cls, "name", cls.__name__)

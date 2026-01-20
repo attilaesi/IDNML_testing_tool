@@ -11,26 +11,26 @@ class TestConfig:
 
     def __init__(self):
         # ─────────────────────────────────────────────
-        # Core switches you actually tweak
+        # Core switch you actually tweak
         # ─────────────────────────────────────────────
-        # Which site config to use: "independent" or "standard"
-        self.active_site = "independent"
-
-        # UAT vs LIVE
-        #   False => use live URLs from SITE_PROFILES
-        #   True  => use UAT URLs + basic auth + feature cookies
-        self.uat_mode = False
+        # Which site profile to use:
+        #   "independent", "independent_uat", "independent_staging",
+        #   "standard", "standard_uat", "standard_staging"
+        # self.active_site = "independent"
+        self.active_site = "independent_uat"
+        # self.active_site = "independent_staging"
+        # self.active_site = "standard"
 
         # Browser-level settings
         self.browser_config = {
             "headless": False,
             # For now this is the single switch; we’ll refactor to device_mode later
-            "mobile": False,
+            "mobile": True,
             # Playwright default timeout (ms)
             "timeout": 30000,
             # Viewport – keep in sync with mobile flag for now
-            #"viewport": {"width": 390, "height": 844},
-            "viewport": {"width": 1366, "height": 768},
+            "viewport": {"width": 390, "height": 844},
+            # "viewport": {"width": 1366, "height": 768},
         }
 
         # Framework / test behaviour
@@ -43,11 +43,11 @@ class TestConfig:
             "concurrency": 4,  # only used when parallel_tests=True
 
             # Debug / robustness settings
-            "debug_screenshots": False,   # CMP / failure screenshots
-            "cmp_timeout": 3.0,          # seconds to wait for CMP dismiss
+            "debug_screenshots": False,    # CMP / failure screenshots
+            "cmp_timeout": 3.0,            # seconds to wait for CMP dismiss
             "prebid_ready_timeout": 20.0,  # seconds to wait for pbjs + GPT
             "page_type_timeout": 3.0,      # seconds to poll for pageType
-            "warmup_pages": 3,            # number of pages to run before testing start to generate third party API responses 
+            "warmup_pages": 3,             # number of pages to run before testing start
 
             # 🔸 Global trace switch for extra console logging in tests
             "trace": True,
@@ -55,20 +55,20 @@ class TestConfig:
 
         # Output configuration
         self.output_config = {
-        "output_file": "output/output.csv",
-        "output_pagetype_file": "output/output_by_pagetype.csv",
-        "cmp_debug_dir": "output/cmp_debug",
-}
+            "output_file": "output/output.csv",
+            "output_pagetype_file": "output/output_by_pagetype.csv",
+            "cmp_debug_dir": "output/cmp_debug",
+        }
 
-        # 🔹 UAT-specific feature flag cookies
-        # These are only applied when uat_mode=True; the domain is patched
-        # dynamically per URL in framework_manager._set_context_cookies().
-        self.uat_cookies = [
+        # Feature flag cookies for preprod (UAT / staging)
+        # NOTE: application of these cookies should be decided from the URL
+        # (uat-web / staging-web / feat / dev) in framework_manager.
+        self.preprod_cookies = [
             {"name": "feat__ad_api",            "value": "true", "path": "/"},
             {"name": "feat__ad_refresh",        "value": "true", "path": "/"},
             {"name": "feat__cmp_force_enable",  "value": "true", "path": "/"},
             {"name": "feat__primis_new_design", "value": "true", "path": "/"},
-            {"name": "feed", "value": "prod", "path": "/"},
+            {"name": "feed",                   "value": "prod", "path": "/"},
         ]
 
     def get_config(self):
@@ -78,17 +78,18 @@ class TestConfig:
         config.update(self.test_config)
         config.update(self.output_config)
 
-        # Attach UAT flags
-        config["uat_cookies"] = self.uat_cookies
-        config["uat_mode"] = self.uat_mode
+        # Attach cookies (application is decided in framework_manager based on URL)
+        config["preprod_cookies"] = self.preprod_cookies
 
         # Attach site profile & URLs
-        site_profile = SITE_PROFILES[self.active_site]
-        config["active_site"] = self.active_site
+        site_key = str(self.active_site).lower()
+        site_profile = SITE_PROFILES[site_key]
+
+        config["active_site"] = site_key
         config["site_url"] = site_profile["site_url"]
 
-        # Choose URL set by mode and trim to max_pages
-        all_urls = site_profile["uat_urls"] if self.uat_mode else site_profile["live_urls"]
+        # Single URL set per site and trim to max_pages
+        all_urls = site_profile["urls"]
         max_pages = config.get("max_pages", 10)
         config["urls"] = all_urls[:max_pages]
 
