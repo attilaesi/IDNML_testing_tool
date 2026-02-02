@@ -41,10 +41,32 @@ class BrowserManager:
                 "Chrome/120.0.0.0 Safari/537.36"
             )
 
-        self.context = await self.browser.new_context(
-            viewport=viewport,
-            user_agent=user_agent,
-        )
+        # ---------------------------------------------------------------------
+        # IMPORTANT: Basic auth for pre-prod MUST be done via Playwright
+        # http_credentials, NOT by injecting demo:review@ into the URL.
+        #
+        # Injecting credentials into the URL breaks modern JS APIs on some pages:
+        # - History.replaceState / pushState can throw SecurityError
+        # - fetch() can throw when the base URL includes credentials
+        #
+        # Symptoms match your staging logs (replaceState + fetch errors),
+        # and cause downstream failures (pbjs stub only, no config/modules, etc.).
+        # ---------------------------------------------------------------------
+        raw_site_url = (self.config.get("site_url", "") or "").lower()
+        is_preprod = any(tok in raw_site_url for tok in ("uat", "feat", "dev", "staging"))
+
+        context_kwargs = {
+            "viewport": viewport,
+            "user_agent": user_agent,
+        }
+
+        if is_preprod:
+            # Allow override via config, fallback to demo/review
+            username = self.config.get("basic_auth_user", "demo")
+            password = self.config.get("basic_auth_pass", "review")
+            context_kwargs["http_credentials"] = {"username": username, "password": password}
+
+        self.context = await self.browser.new_context(**context_kwargs)
 
         # ---- Init script: hook Prebid events on every page ----
         # This runs before any page scripts and makes sure that once pbjs is

@@ -7,10 +7,12 @@ SITE_PROFILES = {
     "independent": {
         "site_url": "https://www.independent.co.uk",
         "urls": [
-            "https://www.independent.co.uk/tech/cloudflare-down-twitter-not-working-outage-b2867367.html",
-            "https://www.independent.co.uk/news/uk/politics/lord-edmiston-australia-uk-brexit-conservative-budget-b2861973.html",
-            "https://www.independent.co.uk/news/world/europe/turkey-georgia-plane-crash-azerbaijan-soldiers-deaths-b2863408.html",
-            "https://www.independent.co.uk/news/world/europe/ukraine-russia-war-trump-putin-zelensky-pokrovsk-latest-news-b2863404.html",
+            "https://www.independent.co.uk/sport/winter-olympics/lindsey-vonn-winter-olympics-crans-montana-crash-b2910786.html?test_group=lighteradlayout",
+            "https://www.independent.co.uk/news/uk/home-news/golden-eagle-england-rsbp-b2809376.html",
+            "https://www.independent.co.uk/news/world/middle-east/qatar-explosion-israel-airstrike-hamas-doha-latest-news-b2823119.html",
+            "https://www.independent.co.uk/news/uk/home-news/london-bus-theft-mark-hehir-b2910974.html?test_group=lighteradlayout",
+            "https://www.independent.co.uk/climate-change/news/shark-teeth-ocean-acidification-co2-b2814061.html",
+            "https://www.independent.co.uk/news/uk/home-news/food-hunger-crisis-britain-trussell-report-poverty-b2822926.html",
         ],
     },
 

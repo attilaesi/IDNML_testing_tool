@@ -7,39 +7,29 @@ Checks video bidder presence by comparing:
   - bidders actually seen bidding on hero_player in VIDEO bidRequested events
   - bidders expected from Supabase for the current context, restricted to slot=hero_player
 
-IMPORTANT FIX (core bug):
-------------------------
-The global video store can still contain bidRequested events whose payload includes
-multiple bids (banner + video) or mixed adUnitCodes.
+Key fixes
+---------
+1) Publisher/env must prefer explicit runner context (publisher/publication, env/environment)
+   because UAT uses distinct publisher keys (e.g. independent_uat) and URL heuristics return
+   "independent" which causes 0-row Supabase results + skips.
 
-So we DO NOT treat "bidRequested bidderCode" as a video bidder by default.
+2) Supabase "0 rows" behavior:
+   - If explicit ctx is provided -> FAIL (this is a configuration/mapping error we want to catch)
+   - Else -> SKIP (we can't assert)
 
-Instead we:
-  - iterate each bidRequested event's args.bids[]
-  - only count bidders where at least one bid has adUnitCode == "hero_player"
-  - (optional) also treat it as hero_player if bid.mediaTypes.video exists
+3) Keep the core correctness fix:
+   - derive "seen video bidders" ONLY from req.bids[] that match hero_player (or mediaTypes.video)
+   - do NOT treat req.bidderCode alone as sufficient unless at least one bid matches hero criteria
 
-This prevents banner-only bidders from being incorrectly flagged as "unexpected VIDEO bidders".
-
-Data sources
------------
-Seen bidders:
-  - window.__pbjsBidEventsVideo
-  - filtered down to hero_player bids only
-
-Expected bidders (Supabase):
-  - bidder_configs_enriched
-  - filters:
-      publisher, environment, geo, device, page_type
-      slot == "hero_player"
-      is_expected = true
-
+PASS / FAIL / SKIP
+------------------
 SKIPPED:
   - not a video page (pageType != video)
   - pbjs missing
-  - Supabase not configured / returns 0
+  - Supabase not configured
 
 FAILED:
+  - Supabase returns 0 rows for context *when explicit ctx is provided*
   - missing expected video bidders
   - unexpected video bidders
 
@@ -53,6 +43,10 @@ import aiohttp
 from urllib.parse import urlparse
 
 from core.base_test import BaseTest, TestResult, TestState
+
+
+def _norm(s: Any) -> str:
+    return (str(s) if s is not None else "").strip()
 
 
 def _map_pagetype_to_db(page_type: str, liveblog: str) -> str:
@@ -97,6 +91,32 @@ def _env_from_url(url: str) -> str:
     return "prod"
 
 
+def _get_context_publisher(config: dict, url: str) -> str:
+    """
+    Prefer explicit runner context:
+      - config.publisher OR config.publication
+    Fallback: URL heuristic.
+    """
+    pub = _norm(config.get("publisher") or config.get("publication"))
+    return pub if pub else _publisher_from_url(url)
+
+
+def _get_context_environment(config: dict, url: str) -> str:
+    """
+    Prefer explicit runner context:
+      - config.environment OR config.env
+    Fallback: URL heuristic.
+    """
+    env = _norm(config.get("environment") or config.get("env"))
+    return env.lower() if env else _env_from_url(url)
+
+
+def _has_explicit_ctx(config: dict) -> bool:
+    return bool(_norm(config.get("publisher") or config.get("publication"))) or bool(
+        _norm(config.get("environment") or config.get("env"))
+    )
+
+
 class VideoBidderPresenceTest(BaseTest):
     name = "VideoBidderPresenceTest"
 
@@ -127,7 +147,7 @@ class VideoBidderPresenceTest(BaseTest):
             eventsLen: 0,
             bidRequestedEvents: 0,
 
-            // NEW: hero_player-focused counts
+            // hero_player-focused counts
             heroBidRequestedEvents: 0,     // number of bidRequested events that include >=1 hero_player bid
             heroBidsTotal: 0,              // total number of bids in req.bids[] that match hero_player (or mediaTypes.video)
             biddersFromHeroRequests: [],   // DISTINCT bidder codes that actually bid on hero_player
@@ -170,14 +190,13 @@ class VideoBidderPresenceTest(BaseTest):
           // Treat a bid as hero-video if:
           //  1) adUnitCode === "hero_player"
           //  OR
-          //  2) mediaTypes.video exists AND (adUnitCode missing/unknown)
+          //  2) mediaTypes.video exists (best-effort fallback)
           const isHeroVideoBid = (bid) => {
             if (!bid || typeof bid !== "object") return false;
 
             const auc = norm(bid.adUnitCode);
             if (auc === HERO) return true;
 
-            // fallback: check for video mediatype (best-effort)
             try {
               const mt = bid.mediaTypes || bid.mediaType || null;
               if (mt && typeof mt === "object") {
@@ -298,10 +317,7 @@ class VideoBidderPresenceTest(BaseTest):
         }
 
         if self.config.get("trace"):
-            print(
-                "[VideoBidderPresenceTest] Supabase request:",
-                {"api_url": api_url, "params": params},
-            )
+            print("[VideoBidderPresenceTest] Supabase request:", {"api_url": api_url, "params": params})
 
         bidders: Set[str] = set()
 
@@ -329,7 +345,6 @@ class VideoBidderPresenceTest(BaseTest):
     async def validate(self, result: TestResult) -> TestResult:
         diag: Dict[str, Any] = result.data or {}
 
-        # Ensure metadata exists (your current version can crash here)
         if result.metadata is None or not isinstance(result.metadata, dict):
             result.metadata = {}
 
@@ -349,23 +364,17 @@ class VideoBidderPresenceTest(BaseTest):
         liveblog = diag.get("liveblog") or ""
         db_page_type = _map_pagetype_to_db(gpt_page_type, liveblog)
 
-        publisher = _publisher_from_url(result.url)
+        # ✅ FIX: prefer explicit ctx from runner/config; fallback to URL heuristic only if missing
+        publisher = _get_context_publisher(self.config, result.url)
+        environment = _get_context_environment(self.config, result.url)
+
         device = "mobile" if self.config.get("mobile", True) else "desktop"
         geo = locale.lower()
-        environment = _env_from_url(result.url)
 
-        # ✅ FIX: only bidders that actually bid on hero_player
+        # ✅ only bidders that actually bid on hero_player
         seen: Set[str] = set(diag.get("biddersFromHeroRequests") or [])
 
-        expected_list = await self._fetch_expected_bidders(
-            publisher=publisher,
-            environment=environment,
-            device=device,
-            geo=geo,
-            page_type=db_page_type,
-        )
-
-        # Attach context + capture counts for easy debugging
+        # attach context + capture counts for easy debugging
         result.metadata.update(
             {
                 "publisher": publisher,
@@ -385,13 +394,32 @@ class VideoBidderPresenceTest(BaseTest):
             }
         )
 
-        if not expected_list:
+        # Supabase not configured at all -> SKIP
+        supabase_url = (
+            self.config.get("supabase_url")
+            or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+            or os.getenv("SUPABASE_URL")
+        )
+        supabase_key = (
+            self.config.get("supabase_anon_key")
+            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+            or os.getenv("SUPABASE_ANON_KEY")
+        )
+        if not supabase_url or not supabase_key:
             result.state = TestState.SKIPPED
-            result.warnings.append(
-                "Supabase returned 0 expected VIDEO bidders for context: "
-                f"publisher={publisher}, env={environment}, geo={geo}, device={device}, "
-                f"page_type={db_page_type}, slot=hero_player"
-            )
+            result.warnings.append("Supabase not configured; cannot assert expected VIDEO bidders.")
+            return result
+
+        expected_list = await self._fetch_expected_bidders(
+            publisher=publisher,
+            environment=environment,
+            device=device,
+            geo=geo,
+            page_type=db_page_type,
+        )
+
+        # ✅ If ctx explicitly provided (publisher/env), empty expected should be a FAIL (likely mismatch / missing rows)
+        if not expected_list:
             result.metadata.update(
                 {
                     "expected_bidders": [],
@@ -400,6 +428,22 @@ class VideoBidderPresenceTest(BaseTest):
                     "unexpected_bidders": [],
                 }
             )
+
+            if _has_explicit_ctx(self.config):
+                result.state = TestState.FAILED
+                result.errors.append(
+                    "Supabase returned 0 expected VIDEO bidders for context: "
+                    f"publisher={publisher}, env={environment}, geo={geo}, device={device}, "
+                    f"page_type={db_page_type}, slot=hero_player. "
+                    "This usually indicates publisher/env/page_type mapping mismatch or missing DB rows."
+                )
+            else:
+                result.state = TestState.SKIPPED
+                result.warnings.append(
+                    "Supabase returned 0 expected VIDEO bidders for context: "
+                    f"publisher={publisher}, env={environment}, geo={geo}, device={device}, "
+                    f"page_type={db_page_type}, slot=hero_player"
+                )
             return result
 
         expected: Set[str] = set(expected_list)

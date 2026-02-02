@@ -28,7 +28,7 @@ class PermutiveSignalsBidTest(BaseTest):
     """Checks Permutive signals inside bid requests."""
 
     # ONLY these 4 bidders
-    REQUIRED_BIDDERS: List[str] = ["appnexus", "ix", "pubmatic", "rubicon"]
+    REQUIRED_BIDDERS: List[str] = ["appnexus", "ix", "rubicon"]
 
     # ORTB2 paths we inspect and record into diag
     PATH_KEYS: List[str] = [

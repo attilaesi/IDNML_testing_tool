@@ -1,11 +1,13 @@
 # core/framework_manager.py
 
 import asyncio
+import sys
+from collections import defaultdict
 from typing import List, Dict, Type, Optional
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
 
 from core.readiness_waiter import ReadinessWaiter
-from core.base_test import BaseTest, TestResult, TestState  # TestState kept for completeness
+from core.base_test import BaseTest, TestResult, TestState
 from core.browser_manager import BrowserManager
 from core.cmp_handler import CMPHandler
 from core.data_extractor import DataExtractor  # noqa: F401 (used by tests)
@@ -29,6 +31,9 @@ class TestFramework:
 
         # CSV writer helper
         self.csv_writer = CSVWriter(config)
+
+        # Keep URL order for the session (so matrix cols are stable)
+        self.selected_urls: List[str] = []
 
     # ------------- URL helpers -------------
 
@@ -60,33 +65,15 @@ class TestFramework:
 
     def _add_basic_auth_to_url(self, url: str) -> str:
         """
-        If URL points to a UAT/DEV/FEAT/STAGING environment, inject basic auth credentials
-        like: https://demo:review@uat-web.independent.co.uk/...
+        IMPORTANT:
+        Do NOT inject credentials into the URL (demo:review@...).
+
+        It breaks JS on staging (History.replaceState / fetch), because the page tries
+        to manipulate the URL without credentials, which becomes cross-origin / invalid.
+
+        Basic auth is now handled via Playwright context http_credentials.
         """
-        if not url:
-            return url
-
-        # Only apply if clearly pre-prod
-        if not self._is_preprod_url(url):
-            return url
-
-        username = "demo"
-        password = "review"
-
-        parsed = urlparse(url)
-
-        # Avoid double-injecting
-        if parsed.username or parsed.password:
-            return url
-
-        netloc = parsed.netloc
-        if not netloc:
-            return url
-
-        parsed = parsed._replace(netloc=f"{username}:{password}@{netloc}")
-        auth_url = urlunparse(parsed)
-        print(f"🔐 Injected basic auth into URL for pre-prod (uat/feat/dev/staging): {auth_url}")
-        return auth_url
+        return url
 
     async def _set_context_cookies(self, page, url: str) -> None:
         """
@@ -95,8 +82,11 @@ class TestFramework:
         Always:
           - is_mobile_or_tablet
 
-        For pre-prod (UAT / FEAT / DEV / STAGING):
+        For UAT / FEAT / DEV only (NOT staging):
           - feature flag cookies from config['preprod_cookies']
+
+        Note:
+          - STAGING only needs is_mobile_or_tablet.
         """
         is_mobile = bool(self.config.get("mobile", True))
         preprod_cookies = self.config.get("preprod_cookies", [])
@@ -106,7 +96,12 @@ class TestFramework:
         host = parsed.hostname or "www.independent.co.uk"
         domain = host  # host-only cookie
 
-        is_preprod = self._is_preprod_url(raw)
+        raw_l = (raw or "").lower()
+
+        # UAT/FEAT/DEV get feature-flag cookies; STAGING does not.
+        is_uat_like = any(tok in raw_l for tok in ("uat", "feat", "dev"))
+        is_staging = "staging" in raw_l
+        apply_preprod_cookies = is_uat_like and not is_staging
 
         cookies = [
             {
@@ -117,16 +112,16 @@ class TestFramework:
             }
         ]
 
-        if is_preprod and preprod_cookies:
+        if apply_preprod_cookies and preprod_cookies:
             for base_cookie in preprod_cookies:
-                c = dict(base_cookie)           # shallow copy
+                c = dict(base_cookie)  # shallow copy
                 c.setdefault("domain", domain)  # apply current host if not set
                 cookies.append(c)
 
         try:
             await page.context.add_cookies(cookies)
             print(
-                f"🌍 Context cookies set (mobile={is_mobile}, preprod={is_preprod}): "
+                f"🌍 Context cookies set (mobile={is_mobile}, preprod_cookies={apply_preprod_cookies}): "
                 f"{[c['name'] + '=' + c['value'] for c in cookies]}"
             )
         except Exception as e:
@@ -289,6 +284,176 @@ class TestFramework:
             pass
         return {"displayEvents": 0, "videoEvents": 0, "displayBidReq": 0, "videoBidReq": 0}
 
+    # ------------- Matrix helpers -------------
+
+    def _short_hint(self, msg: object, max_len: int = 28) -> str:
+        try:
+            s = str(msg).strip()
+        except Exception:
+            return ""
+        if not s:
+            return ""
+        s = s.splitlines()[0]
+        return s[:max_len] + ("…" if len(s) > max_len else "")
+
+    def _format_cell(self, state: TestState, errors, warnings) -> str:
+        if state == TestState.PASSED:
+            return "PASS"
+        if state == TestState.SKIPPED:
+            return "SKIP"
+        if state == TestState.ERROR:
+            hint = self._short_hint(errors[0]) if errors else ""
+            return f"ERROR ({hint})" if hint else "ERROR"
+        if state == TestState.FAILED:
+            msgs = errors if errors else warnings
+            hint = self._short_hint(msgs[0]) if msgs else ""
+            return f"FAIL ({hint})" if hint else "FAIL"
+        return str(state)
+
+    def _print_matrix_summary(self, results: List[TestResult], urls: List[str]) -> None:
+        """
+        Boxed matrix with:
+          - separator AFTER EVERY ROW
+          - width caps
+          - auto column-chunking based on terminal width (prevents wrapping like URL6 on left)
+          - URL header includes (video|display|unknown)
+        """
+        import shutil
+
+        if not urls:
+            seen = set()
+            urls = []
+            for r in results:
+                u = getattr(r, "url", None)
+                if u and u not in seen:
+                    seen.add(u)
+                    urls.append(u)
+
+        # ----------------------------
+        # Determine page type per URL
+        # ----------------------------
+        url_page_type: Dict[str, str] = {}
+        for r in results:
+            u = getattr(r, "url", None)
+            if not u or u in url_page_type:
+                continue
+
+            meta = getattr(r, "metadata", None) or {}
+            pt = (meta.get("page_type") or "").strip().lower()
+
+            if pt == "video":
+                url_page_type[u] = "video"
+            elif pt:
+                # treat any non-video page_type as display for matrix scan purposes
+                url_page_type[u] = "display"
+            else:
+                url_page_type[u] = "unknown"
+
+        # URL labels (now include page type)
+        url_labels_all = []
+        for i, u in enumerate(urls, start=1):
+            pt = url_page_type.get(u, "unknown")
+            url_labels_all.append(f"URL{i} ({pt})")
+
+        # Map URL -> label (must match the new labels above)
+        url_to_label = {u: lbl for u, lbl in zip(urls, url_labels_all)}
+        label_to_url = {lbl: u for u, lbl in zip(urls, url_labels_all)}  # kept in case you use later
+
+        test_names = sorted({r.test_name for r in results if getattr(r, "test_name", None)})
+
+        # Build matrix[test][URLx] = cell
+        matrix = defaultdict(dict)
+        for r in results:
+            t = getattr(r, "test_name", None)
+            u = getattr(r, "url", None)
+            if not t or not u:
+                continue
+            lbl = url_to_label.get(u)
+            if not lbl:
+                continue
+            matrix[t][lbl] = self._format_cell(
+                r.state,
+                getattr(r, "errors", None) or [],
+                getattr(r, "warnings", None) or [],
+            )
+
+        # Width caps (tunable)
+        max_test_col = int(self.config.get("matrix_max_test_width", 36) or 36)
+        max_cell_col = int(self.config.get("matrix_max_cell_width", 22) or 22)
+
+        def clip(s: str, max_len: int) -> str:
+            s = str(s)
+            if len(s) <= max_len:
+                return s
+            return s[: max_len - 1] + "…"
+
+        # Terminal width → decide how many URL columns fit without wrapping
+        term_width = shutil.get_terminal_size(fallback=(160, 40)).columns
+
+        def estimated_table_width(num_url_cols: int) -> int:
+            # pipes/spaces overhead is baked into +4 per col, conservative
+            return 4 + (max_test_col + 3) + num_url_cols * (max_cell_col + 3) + (num_url_cols + 2)
+
+        # Minimum 1 URL col per block
+        max_cols = 1
+        for n in range(1, len(url_labels_all) + 1):
+            if estimated_table_width(n) <= term_width:
+                max_cols = n
+            else:
+                break
+
+        max_cols = max(1, max_cols)
+
+        def print_block(block_labels: List[str], block_idx: int, total_blocks: int) -> None:
+            header = ["Test"] + block_labels
+            rows = [[t] + [matrix[t].get(lbl, "-") for lbl in block_labels] for t in test_names]
+
+            # Compute widths for this block (still capped)
+            widths = [len("Test")] + [len(h) for h in block_labels]
+            for row in rows:
+                widths[0] = min(max(widths[0], len(str(row[0]))), max_test_col)
+                for i in range(1, len(row)):
+                    widths[i] = min(max(widths[i], len(str(row[i]))), max_cell_col)
+
+            def fmt_row(cols):
+                out = []
+                for i, c in enumerate(cols):
+                    out.append(clip(c, widths[i]).ljust(widths[i]))
+                return "| " + " | ".join(out) + " |"
+
+            def sep(char: str = "-") -> str:
+                parts = ["+" + (char * (w + 2)) for w in widths]
+                return "".join(parts) + "+"
+
+            title = "📊 TEST SUMMARY MATRIX (rows=tests, cols=URLs)"
+            if total_blocks > 1:
+                title += f"  [block {block_idx}/{total_blocks}]"
+
+            print("\n" + "=" * 70)
+            print(title)
+            print("=" * 70)
+
+            print(sep("-"))
+            print(fmt_row(header))
+            print(sep("="))
+            for row in rows:
+                print(fmt_row(row))
+                print(sep("-"))
+
+        # Chunk URL labels into blocks
+        blocks = [
+            url_labels_all[i:i + max_cols]
+            for i in range(0, len(url_labels_all), max_cols)
+        ]
+
+        for idx, block in enumerate(blocks, start=1):
+            print_block(block, idx, len(blocks))
+
+        print("\nURL KEY")
+        for i, u in enumerate(urls, start=1):
+            pt = url_page_type.get(u, "unknown")
+            print(f"URL{i} ({pt}) = {u}")    
+
     # ------------- Test discovery -------------
 
     def discover_tests(self) -> None:
@@ -448,14 +613,44 @@ class TestFramework:
             disallowed = excluded_site | excluded_pt
 
             # Only instantiate / run tests that are allowed for this URL
-            run_classes = [
-                cls for cls in test_classes if _class_name(cls) not in disallowed
-            ]
+            run_classes = [cls for cls in test_classes if _class_name(cls) not in disallowed]
         else:
             # No site plan -> run everything discovered
             run_classes = list(test_classes)
 
         url_results: List[TestResult] = []
+
+        # --- progress helpers ---
+        def _supports_inline_progress() -> bool:
+            try:
+                if not bool(self.config.get("progress_inline", True)):
+                    return False
+                return bool(getattr(sys.stdout, "isatty", lambda: False)())
+            except Exception:
+                return False
+
+        inline = _supports_inline_progress()
+
+        def _progress_start(prefix: str) -> None:
+            if inline:
+                try:
+                    sys.stdout.write(prefix + "running..." + "\r")
+                    sys.stdout.flush()
+                    return
+                except Exception:
+                    pass
+            print(prefix + "running...")
+
+        def _progress_end(prefix: str, status: str) -> None:
+            line = prefix + status
+            if inline:
+                try:
+                    sys.stdout.write("\r\033[2K" + line + "\n")
+                    sys.stdout.flush()
+                    return
+                except Exception:
+                    pass
+            print(line)
 
         # Run each test for this URL (fresh instance per class)
         for cls in run_classes:
@@ -467,6 +662,9 @@ class TestFramework:
                 setattr(test, "locale", locale)
             except Exception:
                 pass
+
+            prefix = f"[{url_idx}/{total_urls}]   {test_name}: "
+            _progress_start(prefix)
 
             try:
                 result = await test.run(page, url)
@@ -484,9 +682,26 @@ class TestFramework:
                     pass
 
                 url_results.append(result)
-                print(f"[{url_idx}/{total_urls}]   {test_name}: {result.state.value}")
+                _progress_end(prefix, result.state.value)
+
             except Exception as e:
-                print(f"[{url_idx}/{total_urls}]   {test_name}: ERROR - {str(e)}")
+                err_result = TestResult(test_name)
+                err_result.url = url
+                err_result.state = TestState.ERROR
+                err_result.errors.append(str(e))
+                try:
+                    if hasattr(err_result, "metadata"):
+                        if err_result.metadata is None:
+                            err_result.metadata = {}
+                        if isinstance(err_result.metadata, dict):
+                            err_result.metadata.setdefault("page_type", page_type_norm)
+                            err_result.metadata.setdefault("locale", locale)
+                            err_result.metadata.setdefault("context_summary", context_summary)
+                except Exception:
+                    pass
+
+                url_results.append(err_result)
+                _progress_end(prefix, f"ERROR - {str(e)}")
 
         left = total_urls - url_idx
         print(f"[{url_idx}/{total_urls}] done, {left} left")
@@ -503,11 +718,7 @@ class TestFramework:
 
         # Which tests to run? (we build the full pool of *classes*; site plan is applied per URL)
         if test_names:
-            test_classes: List[Type[BaseTest]] = [
-                self.tests[name]
-                for name in test_names
-                if name in self.tests
-            ]
+            test_classes: List[Type[BaseTest]] = [self.tests[name] for name in test_names if name in self.tests]
         elif category:
             test_classes = self.get_tests_by_category(category)
         else:
@@ -523,11 +734,9 @@ class TestFramework:
 
         # Get URLs
         selected_urls = await self._get_selected_urls()
+        self.selected_urls = list(selected_urls)  # preserve crawl order for matrix
         total_urls = len(selected_urls)
-        print(
-            f"▶️  Starting crawl: {total_urls} URLs "
-            f"(mobile={self.config.get('mobile', True)})"
-        )
+        print(f"▶️  Starting crawl: {total_urls} URLs (mobile={self.config.get('mobile', True)})")
 
         if total_urls == 0:
             print("⚠️ No URLs found to test (config['urls'] is empty).")
@@ -557,7 +766,6 @@ class TestFramework:
 
         if not parallel:
             # -------- SINGLE-PAGE, SEQUENTIAL MODE --------
-            # Reuse warmup page if we have one; otherwise create a new page
             if self._warm_page is not None:
                 page = self._warm_page
                 print("♻️ Reusing warmup page for main test run")
@@ -575,11 +783,9 @@ class TestFramework:
                 )
                 results.extend(url_results)
 
-            # Do NOT close the page explicitly here – closing the browser/context
-            # at the end will clean up all pages.
         else:
             # -------- PARALLEL MODE (bounded concurrency) --------
-            concurrency = self.config.get("concurrency", 4)
+            concurrency = int(self.config.get("concurrency", 4) or 4)
             semaphore = asyncio.Semaphore(concurrency)
 
             async def run_for_url(url_idx: int, url: str) -> List[TestResult]:
@@ -597,10 +803,7 @@ class TestFramework:
                     finally:
                         await page.close()
 
-            tasks = [
-                asyncio.create_task(run_for_url(idx, url))
-                for idx, url in enumerate(selected_urls, start=1)
-            ]
+            tasks = [asyncio.create_task(run_for_url(idx, url)) for idx, url in enumerate(selected_urls, start=1)]
             url_results_lists = await asyncio.gather(*tasks)
             for url_results in url_results_lists:
                 results.extend(url_results)
@@ -614,5 +817,10 @@ class TestFramework:
 
         # Write additional page-type summary CSV
         await self.csv_writer.write_pagetype_summary(results)
+
+        # Print matrix at the end (matches your desired format)
+        # Default ON; can be disabled via config["print_matrix_summary"]=False
+        if bool(self.config.get("print_matrix_summary", True)):
+            self._print_matrix_summary(results, self.selected_urls)
 
         return results

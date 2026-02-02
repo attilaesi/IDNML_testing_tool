@@ -16,8 +16,8 @@ class TestConfig:
         # Which site profile to use:
         #   "independent", "independent_uat", "independent_staging",
         #   "standard", "standard_uat", "standard_staging"
-        # self.active_site = "independent"
-        self.active_site = "independent_uat"
+        self.active_site = "independent"
+        # self.active_site = "independent_uat"
         # self.active_site = "independent_staging"
         # self.active_site = "standard"
 
@@ -50,7 +50,7 @@ class TestConfig:
             "warmup_pages": 3,             # number of pages to run before testing start
 
             # 🔸 Global trace switch for extra console logging in tests
-            "trace": True,
+            "trace": False,
         }
 
         # Output configuration

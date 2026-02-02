@@ -5,26 +5,27 @@ Checks display bidder presence by comparing:
   - bidders actually seen in DISPLAY bidRequested events (global store)
   - bidders expected from Supabase for the current context, excluding hero_player
 
-Data sources
------------
-Seen bidders:
-  - window.__pbjsBidEventsDisplay (populated by BrowserManager pbjs.onEvent hook)
+Key fix (UAT publisher mismatch)
+-------------------------------
+This test MUST prefer the runner's explicit context (publisher/publication, env/environment)
+over URL-derived heuristics.
 
-Expected bidders (Supabase):
-  - table/view: bidder_configs_enriched
-  - filters:
-      publisher, environment, geo, device, page_type
-      slot != "hero_player"
-      is_expected = true
+Example:
+  DB publisher: independent_uat
+  URL host: uat-web.independent.co.uk  -> URL heuristic would return "independent" (WRONG)
+
+So we read:
+  self.config["publisher"] or self.config["publication"]
+  self.config["environment"] or self.config["env"]
 
 PASS / FAIL / SKIP
 ------------------
 SKIPPED:
   - window.pbjs missing
   - Supabase not configured
-  - Supabase returns 0 rows for context (so we can't assert)
 
 FAILED:
+  - Supabase returns 0 rows for context *when explicit ctx is provided* (likely mismatch or missing DB)
   - missing expected bidders (expected - seen)
   - unexpected bidders (seen - expected)
 
@@ -38,6 +39,10 @@ import aiohttp
 from urllib.parse import urlparse
 
 from core.base_test import BaseTest, TestResult, TestState
+
+
+def _norm(s: Any) -> str:
+    return (str(s) if s is not None else "").strip()
 
 
 def _map_pagetype_to_db(page_type: str, liveblog: str) -> str:
@@ -80,6 +85,32 @@ def _env_from_url(url: str) -> str:
     if any(token in u for token in ("uat", "feat", "dev")):
         return "uat"
     return "prod"
+
+
+def _get_context_publisher(config: dict, url: str) -> str:
+    """
+    Prefer explicit runner context:
+      - config.publisher OR config.publication
+    Fallback: URL heuristic.
+    """
+    pub = _norm(config.get("publisher") or config.get("publication"))
+    return pub if pub else _publisher_from_url(url)
+
+
+def _get_context_environment(config: dict, url: str) -> str:
+    """
+    Prefer explicit runner context:
+      - config.environment OR config.env
+    Fallback: URL heuristic.
+    """
+    env = _norm(config.get("environment") or config.get("env"))
+    return env.lower() if env else _env_from_url(url)
+
+
+def _has_explicit_ctx(config: dict) -> bool:
+    return bool(_norm(config.get("publisher") or config.get("publication"))) or bool(
+        _norm(config.get("environment") or config.get("env"))
+    )
 
 
 class DisplayBidderPresenceTest(BaseTest):
@@ -148,7 +179,6 @@ class DisplayBidderPresenceTest(BaseTest):
 
             bidReq.forEach(ev => {
               const req = ev.args || {};
-              // req.bidderCode is the bidder for that bidRequested event
               if (req.bidderCode) addBidder(req.bidderCode);
               else if (req.bidder) addBidder(req.bidder);
             });
@@ -253,13 +283,14 @@ class DisplayBidderPresenceTest(BaseTest):
         locale = (diag.get("locale") or "UK").strip().upper()
         gpt_page_type = diag.get("pageType") or "unknown"
         liveblog = diag.get("liveblog") or ""
-
         db_page_type = _map_pagetype_to_db(gpt_page_type, liveblog)
 
-        publisher = _publisher_from_url(result.url)
+        # ✅ FIX: prefer explicit ctx from runner/config; fallback to URL heuristic only if missing
+        publisher = _get_context_publisher(self.config, result.url)
+        environment = _get_context_environment(self.config, result.url)
+
         device = "mobile" if self.config.get("mobile", True) else "desktop"
         geo = locale.lower()
-        environment = _env_from_url(result.url)
 
         seen: Set[str] = set(diag.get("biddersFromRequests") or [])
 
@@ -271,12 +302,24 @@ class DisplayBidderPresenceTest(BaseTest):
             page_type=db_page_type,
         )
 
-        if not expected_list:
+        # Supabase not configured at all -> SKIP
+        supabase_url = (
+            self.config.get("supabase_url")
+            or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+            or os.getenv("SUPABASE_URL")
+        )
+        supabase_key = (
+            self.config.get("supabase_anon_key")
+            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+            or os.getenv("SUPABASE_ANON_KEY")
+        )
+        if not supabase_url or not supabase_key:
             result.state = TestState.SKIPPED
-            result.warnings.append(
-                "Supabase returned 0 expected DISPLAY bidders for context: "
-                f"publisher={publisher}, env={environment}, geo={geo}, device={device}, page_type={db_page_type}"
-            )
+            result.warnings.append("Supabase not configured; cannot assert expected DISPLAY bidders.")
+            return result
+
+        # ✅ If ctx explicitly provided (publisher/env), empty expected should be a FAIL (likely mismatch / missing rows)
+        if not expected_list:
             result.metadata.update(
                 {
                     "publisher": publisher,
@@ -291,6 +334,20 @@ class DisplayBidderPresenceTest(BaseTest):
                     "source": diag.get("source"),
                 }
             )
+
+            if _has_explicit_ctx(self.config):
+                result.state = TestState.FAILED
+                result.errors.append(
+                    "Supabase returned 0 expected DISPLAY bidders for context: "
+                    f"publisher={publisher}, env={environment}, geo={geo}, device={device}, page_type={db_page_type}. "
+                    "This usually indicates publisher/env/page_type mapping mismatch or missing DB rows."
+                )
+            else:
+                result.state = TestState.SKIPPED
+                result.warnings.append(
+                    "Supabase returned 0 expected DISPLAY bidders for context: "
+                    f"publisher={publisher}, env={environment}, geo={geo}, device={device}, page_type={db_page_type}"
+                )
             return result
 
         expected: Set[str] = set(expected_list)
