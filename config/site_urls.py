@@ -67,4 +67,13 @@ SITE_PROFILES = {
         "site_url": "https://staging-web.standard.co.uk",
         "urls": [],
     },
+    "standard_dev_master": {
+        "site_url": "https://standard-web-dev.brightsites.co.uk/",
+        "urls": [
+        "https://standard-web-dev.brightsites.co.uk/news/london/homeless-man-battered-woman-mallet-pleads-guilty-b1244683.html",
+        "https://standard-web-dev.brightsites.co.uk/showbiz/emmerdale-mack-boyd-death-scene-ofcom-complaints-b1244730.html",
+        "https://standard-web-dev.brightsites.co.uk/sport/football/transfer-news-live-arsenal-fc-chelsea-liverpool-man-utd-hincapie-garnacho-isak-b1244334.html",
+        "https://standard-web-dev.brightsites.co.uk/news/seven-athome-beauty-gadgets-that-are-really-worth-investing-in-b1244864.html",
+        ],
+    },
 }
