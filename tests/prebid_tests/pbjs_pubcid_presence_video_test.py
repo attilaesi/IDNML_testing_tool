@@ -43,6 +43,7 @@ class PbjsVideoPubcidPresenceTest(BaseTest):
               const out = {
                 hasPbjs: !!window.pbjs,
                 pbjsVersion: (window.pbjs && window.pbjs.version) || null,
+                pageType: null,
 
                 store: "__pbjsBidEventsVideo",
                 eventsLen: 0,
@@ -162,6 +163,14 @@ class PbjsVideoPubcidPresenceTest(BaseTest):
                 else out.biddersMissingPubcid.push(bidder);
               }
 
+              try {
+                const pubads = window.googletag && googletag.pubads ? googletag.pubads() : null;
+                if (pubads) {
+                  const pt = pubads.getTargeting("pageType");
+                  if (pt && pt[0]) out.pageType = String(pt[0]).toLowerCase();
+                }
+              } catch (e) {}
+
               return out;
             }
             """
@@ -202,5 +211,10 @@ class PbjsVideoPubcidPresenceTest(BaseTest):
         return result
 
     async def validate(self, result: TestResult) -> TestResult:
+        page_type = ((result.data or {}).get("pageType") or "unknown").strip().lower()
+        if page_type != "video":
+            result.state = TestState.SKIPPED
+            result.warnings.append(f"Not a video page (pageType={page_type}); skipping PbjsPubcidPresenceVideoTest.")
+            return result
         return result
 

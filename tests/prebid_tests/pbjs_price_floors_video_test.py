@@ -63,6 +63,8 @@ class PbjsPriceFloorsVideoTest(BaseTest):
                 """
                 () => {
                   const out = {
+                    pageType: null,
+
                     // observed activity
                     has_video_store: false,
                     video_events_total: 0,
@@ -217,6 +219,14 @@ class PbjsPriceFloorsVideoTest(BaseTest):
                     out.errors.push(String(e));
                   }
 
+                  try {
+                    const pubads = window.googletag && googletag.pubads ? googletag.pubads() : null;
+                    if (pubads) {
+                      const pt = pubads.getTargeting("pageType");
+                      if (pt && pt[0]) out.pageType = String(pt[0]).toLowerCase();
+                    }
+                  } catch (e) {}
+
                   return out;
                 }
                 """
@@ -232,6 +242,12 @@ class PbjsPriceFloorsVideoTest(BaseTest):
 
     async def validate(self, result: TestResult) -> TestResult:
         if result.state == TestState.ERROR:
+            return result
+
+        page_type = ((result.data or {}).get("pageType") or "unknown").strip().lower()
+        if page_type != "video":
+            result.state = TestState.SKIPPED
+            result.warnings.append(f"Not a video page (pageType={page_type}); skipping PbjsPriceFloorsVideoTest.")
             return result
 
         floors = (result.data or {}).get("prebid_floors_video", {}) or {}

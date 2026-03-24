@@ -77,6 +77,7 @@ class PbjsHeroPlayerPlacementTest(BaseTest):
 
           const diag = {{
             hasPbjs: !!w.pbjs,
+            pageType: null,
             expectedPlacement: {expected_placement},
             source: null,
             eventsLen: 0,
@@ -282,6 +283,14 @@ class PbjsHeroPlayerPlacementTest(BaseTest):
             }});
           }});
 
+          try {{
+            const pubads = window.googletag && googletag.pubads ? googletag.pubads() : null;
+            if (pubads) {{
+              const pt = pubads.getTargeting("pageType");
+              if (pt && pt[0]) diag.pageType = String(pt[0]).toLowerCase();
+            }}
+          }} catch (e) {{}}
+
           return diag;
         }}
         """
@@ -312,6 +321,12 @@ class PbjsHeroPlayerPlacementTest(BaseTest):
 
     async def validate(self, result: TestResult) -> TestResult:
         diag: Dict[str, Any] = result.data or {}
+
+        page_type = (diag.get("pageType") or "unknown").strip().lower()
+        if page_type != "video":
+            result.state = TestState.SKIPPED
+            result.warnings.append(f"Not a video page (pageType={page_type}); skipping PbjsHeroPlayerPlacementTest.")
+            return result
 
         if not diag.get("hasPbjs"):
             result.state = TestState.SKIPPED
