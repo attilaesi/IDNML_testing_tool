@@ -91,6 +91,3 @@ class PbjsIdentityModulesTest(BaseTest):
         # All logic is already baked into execute.
         return result
 
-    async def cleanup(self, page, url: str) -> None:
-        # No extra cleanup required.
-        return

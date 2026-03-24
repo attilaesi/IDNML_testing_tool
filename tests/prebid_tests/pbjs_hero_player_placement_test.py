@@ -385,7 +385,6 @@ class PbjsHeroPlayerPlacementTest(BaseTest):
             result.errors.append("FAILED\n" + "\n".join(lines))
         else:
             result.state = TestState.PASSED
-            result.warnings.append("PASSED\n" + "\n".join(lines))
 
         result.metadata.update(
             {
@@ -394,6 +393,7 @@ class PbjsHeroPlayerPlacementTest(BaseTest):
                 "hero_bids_total": hero_bids_total,
                 "bidders_checked": sorted(per_bidder.keys()),
                 "source": diag.get("source"),
+                "bidder_detail": "\n".join(lines),
             }
         )
 

@@ -195,14 +195,19 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
 
         bidders: Set[str] = set()
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, headers=headers, params=params) as resp:
-                if resp.status != 200:
-                    if self.config.get("trace"):
-                        body = await resp.text()
-                        print("[PbjsDisplayBidderPresenceTest] Supabase HTTP error:", resp.status, body)
-                    return []
-                data = await resp.json()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(api_url, headers=headers, params=params) as resp:
+                    if resp.status != 200:
+                        if self.config.get("trace"):
+                            body = await resp.text()
+                            print("[PbjsDisplayBidderPresenceTest] Supabase HTTP error:", resp.status, body)
+                        return []
+                    data = await resp.json()
+        except Exception as e:
+            if self.config.get("trace"):
+                print("[PbjsDisplayBidderPresenceTest] Supabase request failed:", e)
+            return []
 
         for row in data or []:
             code = (row or {}).get("bidder")

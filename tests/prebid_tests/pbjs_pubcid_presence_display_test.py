@@ -195,5 +195,3 @@ class PbjsDisplayPubcidPresenceTest(BaseTest):
     async def validate(self, result: TestResult) -> TestResult:
         return result
 
-    async def cleanup(self, page, url: str) -> None:
-        return

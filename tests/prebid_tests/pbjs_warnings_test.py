@@ -15,7 +15,7 @@ class PbjsPrebidWarningsTest(BaseTest):
 
     FAIL_PATTERN = "invalid bid sent to bidder"
 
-    WAIT_AFTER_TRIGGER_MS = 5000
+    WAIT_AFTER_TRIGGER_MS = 5000  # default; override via config["warnings_wait_ms"]
 
     # Trace controls
     TRACE_FAILING_ONLY = True
@@ -245,8 +245,9 @@ class PbjsPrebidWarningsTest(BaseTest):
         )
 
         # Wait for forced auction to log warnings
+        wait_ms = int(self.config.get("warnings_wait_ms", self.WAIT_AFTER_TRIGGER_MS))
         try:
-            await page.wait_for_timeout(self.WAIT_AFTER_TRIGGER_MS)
+            await page.wait_for_timeout(wait_ms)
         except Exception:
             pass
 

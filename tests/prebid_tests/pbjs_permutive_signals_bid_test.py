@@ -221,6 +221,8 @@ class PbjsPermutiveSignalsBidTest(BaseTest):
               }}
             }}
 
+            // p_standard is the canonical key; pstandard (no underscore) is a known
+            // mis-casing seen in some Permutive adapter versions — accept both.
             if (Array.isArray(extData.p_standard) || Array.isArray(extData.pstandard)) {{
               const ps = Array.isArray(extData.p_standard) ? extData.p_standard : extData.pstandard;
               recordPath(bidder, "user.ext.data.p_standard", ps);

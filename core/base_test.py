@@ -65,7 +65,7 @@ class BaseTest(ABC):
         """Main test runner with state management"""
         result = TestResult(self.name)
         result.url = url
-        start_time = asyncio.get_event_loop().time()
+        start_time = asyncio.get_running_loop().time()
         
         try:
             result.state = TestState.RUNNING
@@ -89,6 +89,6 @@ class BaseTest(ABC):
             result.errors.append(f"Test execution error: {str(e)}")
         
         finally:
-            result.execution_time = asyncio.get_event_loop().time() - start_time
+            result.execution_time = asyncio.get_running_loop().time() - start_time
             
         return result
