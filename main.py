@@ -1,9 +1,11 @@
 # main.py
 import asyncio
+import time
 from collections import defaultdict
 from typing import List, Any, Dict, Tuple
 
 from core.base_test import TestState
+from core.ansi import green, red, yellow, dim
 
 # Try to use CONFIG if it's exported; otherwise build it from TestConfig
 try:
@@ -209,7 +211,9 @@ async def main():
     framework.discover_tests()
 
     # Run everything
+    _t_start = time.monotonic()
     results = await framework.run_tests()
+    _elapsed = time.monotonic() - _t_start
 
     # ------------------------------------------------------------------
     # SUMMARY
@@ -220,17 +224,20 @@ async def main():
     # Unique-test summary (fixes the misleading counts)
     uniq = _unique_test_summary(executed)
 
-    print("\n" + "=" * 50)
-    print("📊 TEST SUMMARY (overall, unique tests)")
-    print(f"Total tests executed: {uniq['total_unique']}")
-    print(f"✅ Passed: {uniq['passed_unique']}")
-    print(f"❌ Failed: {uniq['failed_unique']}")
-    print(f"💥 Errors: {uniq['errors_unique']}")
+    parts = [
+        f"✅ {green(str(uniq['passed_unique']))} passed",
+        f"❌ {red(str(uniq['failed_unique']))} failed",
+        f"💥 {red(str(uniq['errors_unique']))} errors",
+    ]
     if uniq["mixed_unique"]:
-        print(f"🟨 Mixed: {uniq['mixed_unique']}")
+        parts.append(f"🟨 {yellow(str(uniq['mixed_unique']))} mixed")
+    summary_line = "  |  ".join(parts)
 
-    # Keep the old number visible as info (so nobody loses that signal)
-    print(f"(Info) Total result rows (tests×URLs, excluding SKIP): {len(executed)}")
+    mins, secs = divmod(int(_elapsed), 60)
+    elapsed_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+
+    print("\n" + "=" * 50)
+    print(f"📊 {uniq['total_unique']} tests  ⏱ {elapsed_str}   {summary_line}")
 
     # Optional: per-URL summary (row-based, useful in practice)
     if bool(CONFIG.get("print_summary_per_url", True)):
@@ -255,7 +262,7 @@ async def main():
         _print_matrix_summary(results, url_order=url_order)
 
     # ------------------------------------------------------------------
-    # FAILED/ERROR DETAILS (optional, compact)
+    # FAILED/ERROR DETAILS — grouped by test, listing failing URLs
     # ------------------------------------------------------------------
     if bool(CONFIG.get("print_failed_details", True)):
         failed_or_err_all = [
@@ -263,22 +270,28 @@ async def main():
         ]
         if failed_or_err_all:
             url_to_label = {u: f"U{idx+1}" for idx, u in enumerate(url_order)}
-            grouped = defaultdict(list)
+            total_urls = len(url_order)
+
+            # Group by test name, preserving test order from the matrix
+            by_test: Dict[str, List] = defaultdict(list)
             for r in failed_or_err_all:
-                grouped[r.url].append(r)
+                by_test[r.test_name].append(r)
 
             print("\n" + "-" * 50)
             print("🔍 Failed / Error details")
-            for u in url_order:
-                if u not in grouped:
-                    continue
-                print(f"\n{url_to_label[u]}: {u}")
-                for r in grouped[u]:
-                    print(f"  • {r.test_name} ({r.state.value})")
+            for test_name in sorted(by_test):
+                rs = by_test[test_name]
+                fail_count = len(rs)
+                print(f"\n• {test_name}  {red(f'({fail_count}/{total_urls} URLs)')}")
+                # Sort by URL order
+                rs_sorted = sorted(rs, key=lambda r: url_order.index(r.url) if r.url in url_order else 999)
+                for r in rs_sorted:
+                    label = url_to_label.get(r.url, r.url)
+                    print(f"  {label}  {dim(r.url)}")
                     msgs = r.errors if r.errors else r.warnings
                     for entry in (msgs or []):
                         for line in str(entry).splitlines():
-                            print("      - " + line)
+                            print(dim("      - " + line))
 
     # ------------------------------------------------------------------
     # OPTIONAL: write text report (only if your CSVWriter has it)

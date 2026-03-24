@@ -16,6 +16,7 @@ from core.url_context_helpers import (
     publisher_from_url,
     env_from_url,
 )
+from core.ansi import colour_cell, colour_state, dim
 
 from config.site_test_plans import SITE_TEST_PLANS
 
@@ -380,10 +381,17 @@ class TestFramework:
                 for i in range(1, len(row)):
                     widths[i] = min(max(widths[i], len(str(row[i]))), max_cell_col)
 
-            def fmt_row(cols):
+            def fmt_row(cols, is_header=False):
                 out = []
                 for i, c in enumerate(cols):
-                    out.append(clip(c, widths[i]).ljust(widths[i]))
+                    clipped = clip(c, widths[i])
+                    if not is_header and i > 0:
+                        # Pad based on visible length (before ANSI codes), then colorise
+                        padding = " " * max(0, widths[i] - len(clipped))
+                        padded = colour_cell(clipped) + padding
+                    else:
+                        padded = clipped.ljust(widths[i])
+                    out.append(padded)
                 return "| " + " | ".join(out) + " |"
 
             def sep(char: str = "-") -> str:
@@ -394,12 +402,16 @@ class TestFramework:
             if total_blocks > 1:
                 title += f"  [block {block_idx}/{total_blocks}]"
 
-            print("\n" + "=" * 70)
+            # Compute actual table width from the separator (strip ANSI-safe)
+            table_width = len(sep("-"))
+            border = "=" * max(table_width, len(title))
+
+            print("\n" + border)
             print(title)
-            print("=" * 70)
+            print(border)
 
             print(sep("-"))
-            print(fmt_row(header))
+            print(fmt_row(header, is_header=True))
             print(sep("="))
             for row in rows:
                 print(fmt_row(row))
@@ -553,13 +565,14 @@ class TestFramework:
             "videoBidReq": counts.get("videoBidReq", 0),
         }
 
+        tag = f"[{url_idx}/{total_urls}]"
         print(
-            f"[{url_idx}/{total_urls}] 🔎 Context: "
-            f"publisher={publisher} env={env} device={device} geo={geo} "
-            f"gpt_page_type={page_type_norm} liveblog={(liveblog or 'n/a')} "
-            f"db_page_type={db_page_type} "
-            f"displayEvents={counts.get('displayEvents')} videoEvents={counts.get('videoEvents')} "
-            f"displayBidReq={counts.get('displayBidReq')} videoBidReq={counts.get('videoBidReq')}"
+            f"{tag} 🔎 {publisher}  env={env}  device={device}  geo={geo}"
+            f"  page={page_type_norm}  db_page={db_page_type}  liveblog={(liveblog or 'n/a')}"
+        )
+        print(
+            f"{tag}    events → display={counts.get('displayEvents')}  video={counts.get('videoEvents')}"
+            f"  bidReq display={counts.get('displayBidReq')}  video={counts.get('videoBidReq')}"
         )
 
         # 🔸 Apply site test plan (inherit-all, then exclude by page type)
@@ -664,7 +677,12 @@ class TestFramework:
                     pass
 
                 url_results.append(result)
-                _progress_end(prefix, result.state.value)
+                _progress_end(prefix, colour_state(result.state.value))
+                if result.state in (TestState.FAILED, TestState.ERROR):
+                    msgs = result.errors if result.errors else result.warnings
+                    if msgs:
+                        first = str(msgs[0]).strip().splitlines()[0][:120]
+                        print(dim(f"{'':>{len(prefix)}}  ↳ {first}"))
 
             except Exception as e:
                 err_result = TestResult(test_name)
@@ -683,7 +701,8 @@ class TestFramework:
                     pass
 
                 url_results.append(err_result)
-                _progress_end(prefix, f"ERROR - {str(e)}")
+                _progress_end(prefix, colour_state("error"))
+                print(dim(f"{'':>{len(prefix)}}  ↳ {str(e).strip().splitlines()[0][:120]}"))
 
         left = total_urls - url_idx
         print(f"[{url_idx}/{total_urls}] done, {left} left")

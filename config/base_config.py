@@ -24,7 +24,7 @@ class TestConfig:
 
         # Browser-level settings
         self.browser_config = {
-            "headless": False,
+            "headless": True,
             # For now this is the single switch; we’ll refactor to device_mode later
             "mobile": True,
             # Playwright default timeout (ms)
