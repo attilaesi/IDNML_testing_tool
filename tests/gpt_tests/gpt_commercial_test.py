@@ -69,11 +69,11 @@ class GptCommercialTest(BaseTest):
             result.state = TestState.PASSED
             return result
 
-        bad = [v for v in vals if v.lower() not in {"true", "false"}]
+        bad = [v for v in vals if v.lower() not in {"y", "n"}]
         if bad:
             result.state = TestState.FAILED
             result.errors.append(
-                "Invalid commercial values (expected 'true'/'false'): "
+                "Invalid commercial values (expected 'y'/'n'): "
                 + ", ".join(bad)
             )
         else:

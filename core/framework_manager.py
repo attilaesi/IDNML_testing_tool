@@ -642,15 +642,32 @@ class TestFramework:
             print(prefix + "running...")
 
         def _progress_end(prefix: str, status: str) -> None:
+            """
+            Print final test status, then add spacing so the next test block doesn't
+            visually run into this one.
+
+            Toggle with config["trace_spacing_between_tests"] (default: True).
+            """
             line = prefix + status
+
+            # Default ON
+            spacing = bool(self.config.get("trace_spacing_between_tests", True))
+
             if inline:
                 try:
                     sys.stdout.write("\r\033[2K" + line + "\n")
                     sys.stdout.flush()
+                    if spacing:
+                        # One extra blank line => visible separation between tests
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
                     return
                 except Exception:
                     pass
+
             print(line)
+            if spacing:
+                print()  # blank line between tests
 
         # Run each test for this URL (fresh instance per class)
         for cls in run_classes:

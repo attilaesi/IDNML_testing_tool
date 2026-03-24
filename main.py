@@ -1,7 +1,7 @@
 # main.py
 import asyncio
 from collections import defaultdict
-from typing import List, Dict, Any
+from typing import List, Any, Dict, Tuple
 
 from core.base_test import TestState
 
@@ -112,6 +112,90 @@ def _print_matrix_summary(results, url_order: List[str] = None) -> None:
         print(f"URL{i} = {u}")
 
 
+def _get_url_order(framework: TestFramework, results) -> List[str]:
+    # Prefer framework URL order if present
+    url_order = list(getattr(framework, "selected_urls", []) or [])
+    if url_order:
+        return url_order
+
+    # Fallback: first-seen order from results
+    seen = set()
+    url_order = []
+    for r in results:
+        if getattr(r, "url", None) and r.url not in seen:
+            url_order.append(r.url)
+            seen.add(r.url)
+    return url_order
+
+
+def _unique_test_summary(executed_results) -> Dict[str, int]:
+    """
+    Summarise by UNIQUE test names (not test×URL rows).
+
+    Per-test aggregation rule:
+      - ERROR if the test errors on ANY URL
+      - FAILED if it fails on ANY URL (and no ERROR)
+      - PASSED if it PASSES on ALL URLs where it ran (excluding SKIP)
+      - MIXED otherwise (e.g. some PASS, some SKIP only, etc.)
+    """
+    # group by test_name
+    by_test: Dict[str, List] = defaultdict(list)
+    for r in executed_results:
+        by_test[r.test_name].append(r)
+
+    total_unique = len(by_test)
+    passed_unique = 0
+    failed_unique = 0
+    errors_unique = 0
+    mixed_unique = 0
+
+    for test_name, rs in by_test.items():
+        if any(r.state == TestState.ERROR for r in rs):
+            errors_unique += 1
+            continue
+        if any(r.state == TestState.FAILED for r in rs):
+            failed_unique += 1
+            continue
+        if rs and all(r.state == TestState.PASSED for r in rs):
+            passed_unique += 1
+            continue
+        mixed_unique += 1
+
+    return {
+        "total_unique": total_unique,
+        "passed_unique": passed_unique,
+        "failed_unique": failed_unique,
+        "errors_unique": errors_unique,
+        "mixed_unique": mixed_unique,
+    }
+
+
+def _per_url_summary(executed_results, url_order: List[str]) -> List[Tuple[str, Dict[str, int]]]:
+    """
+    Per-URL row-based counts (this *is* test×URL, but it makes sense per URL).
+    """
+    by_url: Dict[str, List] = defaultdict(list)
+    for r in executed_results:
+        if getattr(r, "url", None):
+            by_url[r.url].append(r)
+
+    out = []
+    for u in url_order:
+        rs = by_url.get(u, [])
+        out.append(
+            (
+                u,
+                {
+                    "executed_rows": len(rs),
+                    "passed_rows": sum(1 for r in rs if r.state == TestState.PASSED),
+                    "failed_rows": sum(1 for r in rs if r.state == TestState.FAILED),
+                    "error_rows": sum(1 for r in rs if r.state == TestState.ERROR),
+                },
+            )
+        )
+    return out
+
+
 async def main():
     print("🚀 Ad Testing Framework")
     print(f"Active site: {CONFIG.get('active_site', '')}")
@@ -128,20 +212,36 @@ async def main():
     results = await framework.run_tests()
 
     # ------------------------------------------------------------------
-    # SUMMARY (exclude skipped from counts)
+    # SUMMARY
     # ------------------------------------------------------------------
     executed = [r for r in results if r.state not in (TestState.SKIPPED,)]
+    url_order = _get_url_order(framework, results)
 
-    passed = sum(1 for r in executed if r.state == TestState.PASSED)
-    failed = sum(1 for r in executed if r.state == TestState.FAILED)
-    errors = sum(1 for r in executed if r.state == TestState.ERROR)
+    # Unique-test summary (fixes the misleading counts)
+    uniq = _unique_test_summary(executed)
 
     print("\n" + "=" * 50)
-    print("📊 TEST SUMMARY (overall)")
-    print(f"Total executed tests: {len(executed)}")
-    print(f"✅ Passed: {passed}")
-    print(f"❌ Failed: {failed}")
-    print(f"💥 Errors: {errors}")
+    print("📊 TEST SUMMARY (overall, unique tests)")
+    print(f"Total tests executed: {uniq['total_unique']}")
+    print(f"✅ Passed: {uniq['passed_unique']}")
+    print(f"❌ Failed: {uniq['failed_unique']}")
+    print(f"💥 Errors: {uniq['errors_unique']}")
+    if uniq["mixed_unique"]:
+        print(f"🟨 Mixed: {uniq['mixed_unique']}")
+
+    # Keep the old number visible as info (so nobody loses that signal)
+    print(f"(Info) Total result rows (tests×URLs, excluding SKIP): {len(executed)}")
+
+    # Optional: per-URL summary (row-based, useful in practice)
+    if bool(CONFIG.get("print_summary_per_url", True)):
+        per_url = _per_url_summary(executed, url_order)
+        print("\n" + "-" * 50)
+        print("📍 Per-URL summary (row-based)")
+        for idx, (u, s) in enumerate(per_url, start=1):
+            print(
+                f"U{idx}: executed={s['executed_rows']} "
+                f"pass={s['passed_rows']} fail={s['failed_rows']} err={s['error_rows']}  |  {u}"
+            )
 
     # ------------------------------------------------------------------
     # MATRIX SUMMARY
@@ -152,7 +252,6 @@ async def main():
     #  - If you want main.py to print it too, set config: print_matrix_in_main=True
     # ------------------------------------------------------------------
     if bool(CONFIG.get("print_matrix_in_main", False)):
-        url_order = getattr(framework, "selected_urls", None)
         _print_matrix_summary(results, url_order=url_order)
 
     # ------------------------------------------------------------------
@@ -163,15 +262,6 @@ async def main():
             r for r in results if r.state in (TestState.FAILED, TestState.ERROR)
         ]
         if failed_or_err_all:
-            # Prefer framework URL order if present
-            url_order = list(getattr(framework, "selected_urls", []) or [])
-            if not url_order:
-                seen = set()
-                for r in results:
-                    if getattr(r, "url", None) and r.url not in seen:
-                        url_order.append(r.url)
-                        seen.add(r.url)
-
             url_to_label = {u: f"U{idx+1}" for idx, u in enumerate(url_order)}
             grouped = defaultdict(list)
             for r in failed_or_err_all:
@@ -189,6 +279,16 @@ async def main():
                     for entry in (msgs or []):
                         for line in str(entry).splitlines():
                             print("      - " + line)
+
+    # ------------------------------------------------------------------
+    # OPTIONAL: write text report (only if your CSVWriter has it)
+    # ------------------------------------------------------------------
+    if bool(CONFIG.get("write_text_report", True)):
+        try:
+            await framework.csv_writer.write_text_report(results, urls=url_order)
+        except Exception:
+            # keep silent to avoid breaking runs if writer not updated yet
+            pass
 
     print()  # final newline
 
