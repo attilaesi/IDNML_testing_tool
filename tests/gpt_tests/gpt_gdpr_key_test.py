@@ -151,6 +151,3 @@ class GptGdprKeyTest(BaseTest):
         for e in errors:
             result.warnings.append(f"Extraction warning: {e}")
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        return

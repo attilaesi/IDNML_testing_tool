@@ -36,81 +36,14 @@ PASSED:
 from typing import Any, Dict, List, Set
 import os
 import aiohttp
-from urllib.parse import urlparse
 
 from core.base_test import BaseTest, TestResult, TestState
-
-
-def _norm(s: Any) -> str:
-    return (str(s) if s is not None else "").strip()
-
-
-def _map_pagetype_to_db(page_type: str, liveblog: str) -> str:
-    pt = (page_type or "").strip().lower()
-    lb = (liveblog or "").strip().lower()
-
-    if pt == "index":
-        return "index"
-
-    if pt == "video":
-        if lb in ("y", "yes", "true", "1"):
-            return "blog_article"
-        return "video_article"
-
-    if pt == "image":
-        return "image_article"
-
-    if pt == "gallery":
-        return "gallery_article"
-
-    return pt or "unknown"
-
-
-def _publisher_from_url(url: str) -> str:
-    host = (urlparse(url or "").hostname or "").lower()
-    if host.endswith("independent.co.uk"):
-        return "independent"
-    if host.endswith("standard.co.uk"):
-        return "standard"
-    return "unknown"
-
-
-def _env_from_url(url: str) -> str:
-    """
-    staging is treated as uat (same bidders/cookies/auth per requirements)
-    """
-    u = (url or "").lower()
-    if "staging" in u:
-        return "uat"
-    if any(token in u for token in ("uat", "feat", "dev")):
-        return "uat"
-    return "prod"
-
-
-def _get_context_publisher(config: dict, url: str) -> str:
-    """
-    Prefer explicit runner context:
-      - config.publisher OR config.publication
-    Fallback: URL heuristic.
-    """
-    pub = _norm(config.get("publisher") or config.get("publication"))
-    return pub if pub else _publisher_from_url(url)
-
-
-def _get_context_environment(config: dict, url: str) -> str:
-    """
-    Prefer explicit runner context:
-      - config.environment OR config.env
-    Fallback: URL heuristic.
-    """
-    env = _norm(config.get("environment") or config.get("env"))
-    return env.lower() if env else _env_from_url(url)
-
-
-def _has_explicit_ctx(config: dict) -> bool:
-    return bool(_norm(config.get("publisher") or config.get("publication"))) or bool(
-        _norm(config.get("environment") or config.get("env"))
-    )
+from core.url_context_helpers import (
+    map_pagetype_to_db,
+    get_context_publisher,
+    get_context_environment,
+    has_explicit_ctx,
+)
 
 
 class PbjsDisplayBidderPresenceTest(BaseTest):
@@ -289,11 +222,11 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         locale = (diag.get("locale") or "UK").strip().upper()
         gpt_page_type = diag.get("pageType") or "unknown"
         liveblog = diag.get("liveblog") or ""
-        db_page_type = _map_pagetype_to_db(gpt_page_type, liveblog)
+        db_page_type = map_pagetype_to_db(gpt_page_type, liveblog)
 
         # ✅ FIX: prefer explicit ctx from runner/config; fallback to URL heuristic only if missing
-        publisher = _get_context_publisher(self.config, result.url)
-        environment = _get_context_environment(self.config, result.url)
+        publisher = get_context_publisher(self.config, result.url)
+        environment = get_context_environment(self.config, result.url)
 
         device = "mobile" if self.config.get("mobile", True) else "desktop"
         geo = locale.lower()
@@ -341,7 +274,7 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
                 }
             )
 
-            if _has_explicit_ctx(self.config):
+            if has_explicit_ctx(self.config):
                 result.state = TestState.FAILED
                 result.errors.append(
                     "Supabase returned 0 expected DISPLAY bidders for context: "
@@ -386,6 +319,3 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         )
 
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        return

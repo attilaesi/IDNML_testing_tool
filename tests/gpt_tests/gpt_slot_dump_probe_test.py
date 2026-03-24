@@ -78,6 +78,3 @@ class GptSlotDumpProbeTest(BaseTest):
         if result.state == TestState.PENDING:
             result.state = TestState.PASSED
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        return

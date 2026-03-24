@@ -23,11 +23,12 @@ What counts as PASS / FAIL / SKIPPED
     - GPT targeting not available.
 """
 
-from typing import Dict, Any, List
-from core.base_test import BaseTest, TestResult, TestState
+from typing import List
+from core.gpt_base_test import GptBaseTest
+from core.base_test import TestResult, TestState
 
 
-class GptPageTypeTest(BaseTest):
+class GptPageTypeTest(GptBaseTest):
     NORMALIZED_NAME = "gpt_page_type_test"
 
     def __init__(self, *args, **kwargs):
@@ -35,10 +36,6 @@ class GptPageTypeTest(BaseTest):
         self.name = self.NORMALIZED_NAME
 
     """Validate GPT 'pageType' targeting is present and non-empty."""
-
-    async def setup(self, page, url: str) -> bool:
-        js = "(() => !!(window.googletag && googletag.pubads))()"
-        return bool(await page.evaluate(js))
 
     async def execute(self, page, url: str) -> TestResult:
         result = TestResult(self.name)
@@ -76,6 +73,3 @@ class GptPageTypeTest(BaseTest):
                 result.errors.append("pageType targeting contains only empty values.")
 
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        return

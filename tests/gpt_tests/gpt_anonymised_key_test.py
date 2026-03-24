@@ -36,10 +36,11 @@ What counts as PASS / FAIL / SKIPPED
 
 from typing import Dict, Any, List
 
-from core.base_test import BaseTest, TestResult, TestState
+from core.gpt_base_test import GptBaseTest
+from core.base_test import TestResult, TestState
 
 
-class GptAnonymisedKeyTest(BaseTest):
+class GptAnonymisedKeyTest(GptBaseTest):
     NORMALIZED_NAME = "gpt_anonymised_key_test"
 
     def __init__(self, *args, **kwargs):
@@ -47,25 +48,6 @@ class GptAnonymisedKeyTest(BaseTest):
         self.name = self.NORMALIZED_NAME
 
     """See module docstring for full explanation."""
-
-    async def setup(self, page, url: str) -> bool:
-        """
-        Setup phase.
-
-        We just check that GPT is present in a basic way. If not, we skip.
-        """
-        has_gpt = await page.evaluate(
-            """
-            () => {
-              try {
-                return !!(window.googletag && googletag.pubads && googletag.pubads());
-              } catch (e) {
-                return false;
-              }
-            }
-            """
-        )
-        return bool(has_gpt)
 
     async def execute(self, page, url: str) -> TestResult:
         """
@@ -166,12 +148,3 @@ class GptAnonymisedKeyTest(BaseTest):
             f"with {len(values)} value(s)."
         )
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        """
-        Cleanup phase.
-
-        Currently a no-op; kept for symmetry and future use (e.g. debugging
-        screenshots or extra logging when this test fails).
-        """
-        return

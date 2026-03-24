@@ -26,10 +26,11 @@ What counts as PASS / FAIL / SKIPPED
 """
 
 from typing import Dict, Any, List
-from core.base_test import BaseTest, TestResult, TestState
+from core.gpt_base_test import GptBaseTest
+from core.base_test import TestResult, TestState
 
 
-class GptAutorefreshTest(BaseTest):
+class GptAutorefreshTest(GptBaseTest):
     NORMALIZED_NAME = "gpt_autorefresh_test"
 
     def __init__(self, *args, **kwargs):
@@ -37,10 +38,6 @@ class GptAutorefreshTest(BaseTest):
         self.name = self.NORMALIZED_NAME
 
     """Validate GPT autorefresh targeting key shape."""
-
-    async def setup(self, page, url: str) -> bool:
-        js = "(() => !!(window.googletag && googletag.pubads))()"
-        return bool(await page.evaluate(js))
 
     async def execute(self, page, url: str) -> TestResult:
         result = TestResult(self.name)
@@ -84,6 +81,3 @@ class GptAutorefreshTest(BaseTest):
             result.state = TestState.PASSED
 
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        return

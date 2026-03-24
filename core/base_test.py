@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 from enum import Enum
 import asyncio
-import time
 
 class TestState(Enum):
     PENDING = "pending"
@@ -22,7 +21,6 @@ class TestResult:
         self.warnings = []
         self.execution_time = 0
         self.metadata = {}
-        self.timestamp = time.time()
 
 class BaseTest(ABC):
     def __init__(self, config: Dict[str, Any]):
@@ -30,7 +28,6 @@ class BaseTest(ABC):
         self.name = self.__class__.__name__
         self.description = self.__doc__ or "No description provided"
         self.category = self._get_category()
-        self.dependencies = self._get_dependencies()
         
     @abstractmethod
     async def setup(self, page, url: str) -> bool:
@@ -47,10 +44,9 @@ class BaseTest(ABC):
         """Validation logic for test results"""
         pass
     
-    @abstractmethod
     async def cleanup(self, page, result: TestResult) -> None:
-        """Cleanup phase - screenshots, debugging, etc."""
-        pass
+        """Cleanup phase - screenshots, debugging, etc. Override if needed."""
+        return
     
     def _get_category(self) -> str:
         """Extract category from module path"""
@@ -64,10 +60,6 @@ class BaseTest(ABC):
         elif 'performance_tests' in module_path:
             return 'Performance'
         return 'Unknown'
-    
-    def _get_dependencies(self) -> List[str]:
-        """Override to specify test dependencies"""
-        return []
     
     async def run(self, page, url: str) -> TestResult:
         """Main test runner with state management"""

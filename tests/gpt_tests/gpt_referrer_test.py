@@ -97,6 +97,3 @@ class GptReferrerTest(BaseTest):
             )
 
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        return

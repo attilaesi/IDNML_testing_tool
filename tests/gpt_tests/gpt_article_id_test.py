@@ -30,10 +30,11 @@ What counts as PASS / FAIL / SKIPPED
 """
 
 from typing import Dict, Any, List
-from core.base_test import BaseTest, TestResult, TestState
+from core.gpt_base_test import GptBaseTest
+from core.base_test import TestResult, TestState
 
 
-class GptArticleIdTest(BaseTest):
+class GptArticleIdTest(GptBaseTest):
     NORMALIZED_NAME = "gpt_article_id_test"
 
     def __init__(self, *args, **kwargs):
@@ -43,11 +44,6 @@ class GptArticleIdTest(BaseTest):
     """Validate GPT article identifier targeting on article-like pages."""
 
     CANDIDATE_KEYS = ["article", "articleid", "article_id", "content_id"]
-
-    async def setup(self, page, url: str) -> bool:
-        js = "(() => !!(window.googletag && googletag.pubads))()"
-        has_gpt = await page.evaluate(js)
-        return bool(has_gpt)
 
     async def execute(self, page, url: str) -> TestResult:
         result = TestResult(self.name)
@@ -129,6 +125,3 @@ class GptArticleIdTest(BaseTest):
             )
 
         return result
-
-    async def cleanup(self, page, result: TestResult) -> None:
-        return

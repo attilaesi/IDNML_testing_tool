@@ -11,6 +11,11 @@ from core.base_test import BaseTest, TestResult, TestState
 from core.browser_manager import BrowserManager
 from core.cmp_handler import CMPHandler
 from core.data_extractor import DataExtractor  # noqa: F401 (used by tests)
+from core.url_context_helpers import (
+    map_pagetype_to_db,
+    publisher_from_url,
+    env_from_url,
+)
 
 from config.site_test_plans import SITE_TEST_PLANS
 
@@ -47,21 +52,10 @@ class TestFramework:
         return any(t in u for t in ("uat", "feat", "dev", "staging"))
 
     def _publisher_from_url(self, url: str) -> str:
-        """
-        Derive publication (publisher) from URL host.
-        This must NOT use active_site because active_site can be:
-          independent_uat / independent_staging
-        but publisher in DB remains: independent.
-        """
-        host = (urlparse(url or "").hostname or "").lower()
-
-        if host.endswith("independent.co.uk"):
-            return "independent"
-        if host.endswith("standard.co.uk"):
-            return "standard"
-
-        # fallback: keep existing behaviour as last resort
-        return str(self.config.get("active_site", "independent")).lower()
+        result = publisher_from_url(url)
+        if result == "unknown":
+            return str(self.config.get("active_site", "independent")).lower()
+        return result
 
     def _add_basic_auth_to_url(self, url: str) -> str:
         """
@@ -202,16 +196,7 @@ class TestFramework:
     # ------------- Global context trace helpers -------------
 
     def _env_from_url(self, url: str) -> str:
-        """
-        Infer env from URL.
-        IMPORTANT: staging is treated as uat (same cookies/auth and same bidders).
-        """
-        u = (url or "").lower()
-        if "staging" in u:
-            return "uat"
-        if any(t in u for t in ("uat", "feat", "dev")):
-            return "uat"
-        return "prod"
+        return env_from_url(url)
 
     async def _detect_liveblog(self, page) -> str:
         """
@@ -236,27 +221,7 @@ class TestFramework:
             return ""
 
     def _map_pagetype_to_db(self, page_type: str, liveblog: str) -> str:
-        """
-        Map GPT pageType + liveblog targeting into DB page_type values.
-        """
-        pt = (page_type or "").strip().lower()
-        lb = (liveblog or "").strip().lower()
-
-        if pt == "index":
-            return "index"
-
-        if pt == "video":
-            if lb in ("y", "yes", "true", "1"):
-                return "blog_article"
-            return "video_article"
-
-        if pt == "image":
-            return "image_article"
-
-        if pt == "gallery":
-            return "gallery_article"
-
-        return pt or "unknown"
+        return map_pagetype_to_db(page_type, liveblog)
 
     async def _get_event_store_counts(self, page) -> Dict[str, int]:
         """
