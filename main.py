@@ -246,7 +246,7 @@ async def main():
         print("📍 Per-URL summary (row-based)")
         for idx, (u, s) in enumerate(per_url, start=1):
             print(
-                f"U{idx}: executed={s['executed_rows']} "
+                f"URL{idx}: executed={s['executed_rows']} "
                 f"pass={s['passed_rows']} fail={s['failed_rows']} err={s['error_rows']}  |  {u}"
             )
 
@@ -269,8 +269,16 @@ async def main():
             r for r in results if r.state in (TestState.FAILED, TestState.ERROR)
         ]
         if failed_or_err_all:
-            url_to_label = {u: f"U{idx+1}" for idx, u in enumerate(url_order)}
+            url_to_label = {u: f"URL{idx+1}" for idx, u in enumerate(url_order)}
             total_urls = len(url_order)
+
+            # Build URL -> page_type from result metadata
+            url_to_pagetype: Dict[str, str] = {}
+            for r in results:
+                u = getattr(r, "url", None)
+                if u and u not in url_to_pagetype:
+                    pt = (getattr(r, "metadata", None) or {}).get("page_type") or "unknown"
+                    url_to_pagetype[u] = pt
 
             # Group by test name, preserving test order from the matrix
             by_test: Dict[str, List] = defaultdict(list)
@@ -287,7 +295,8 @@ async def main():
                 rs_sorted = sorted(rs, key=lambda r: url_order.index(r.url) if r.url in url_order else 999)
                 for r in rs_sorted:
                     label = url_to_label.get(r.url, r.url)
-                    print(f"  {label}  {dim(r.url)}")
+                    page_type = url_to_pagetype.get(r.url, "unknown")
+                    print(f"  {label}  [{page_type}]  {dim(r.url)}")
                     msgs = r.errors if r.errors else r.warnings
                     for entry in (msgs or []):
                         for line in str(entry).splitlines():
