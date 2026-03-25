@@ -290,7 +290,9 @@ async def main():
             for test_name in sorted(by_test):
                 rs = by_test[test_name]
                 fail_count = len(rs)
-                print(f"\n• {test_name}  {red(f'({fail_count}/{total_urls} URLs)')}")
+                has_error = any(r.state == TestState.ERROR for r in rs)
+                state_label = red("ERROR") if has_error else red("FAIL")
+                print(f"\n• {test_name}  {state_label}  {red(f'({fail_count}/{total_urls} URLs)')}")
                 # Sort by URL order
                 rs_sorted = sorted(rs, key=lambda r: url_order.index(r.url) if r.url in url_order else 999)
                 for r in rs_sorted:
@@ -301,6 +303,25 @@ async def main():
                     for entry in (msgs or []):
                         for line in str(entry).splitlines():
                             print(dim("      - " + line))
+
+    # ------------------------------------------------------------------
+    # PASSED DETAILS — grouped by test, listing passing URLs
+    # ------------------------------------------------------------------
+    if bool(CONFIG.get("print_passed_details", True)):
+        passed_all = [r for r in results if r.state == TestState.PASSED]
+        if passed_all:
+            total_urls = len(url_order)
+
+            by_test_p: Dict[str, List] = defaultdict(list)
+            for r in passed_all:
+                by_test_p[r.test_name].append(r)
+
+            print("\n" + "-" * 50)
+            print("✅ Passing test details")
+            for test_name in sorted(by_test_p):
+                rs = by_test_p[test_name]
+                pass_count = len(rs)
+                print(f"\n• {test_name}  {green('PASS')}  {green(f'({pass_count}/{total_urls} URLs)')}")
 
     # ------------------------------------------------------------------
     # OPTIONAL: write text report (only if your CSVWriter has it)

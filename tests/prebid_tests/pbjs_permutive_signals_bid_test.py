@@ -27,7 +27,7 @@ class PbjsPermutiveSignalsBidTest(BaseTest):
     """Checks Permutive signals inside bid requests."""
 
     # Only these bidders are validated
-    REQUIRED_BIDDERS: List[str] = ["appnexus", "ix", "rubicon", "msft"]
+    REQUIRED_BIDDERS: List[str] = [ "ix", "rubicon", "msft", "pubmatic"]
 
     # ORTB2 paths we inspect and record into diag
     PATH_KEYS: List[str] = [

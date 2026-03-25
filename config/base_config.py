@@ -16,8 +16,8 @@ class TestConfig:
         # Which site profile to use:
         #   "independent", "independent_uat", "independent_staging",
         #   "standard", "standard_uat", "standard_staging"
-        self.active_site = "independent"
-        # self.active_site = "independent_uat"
+        # self.active_site = "independent"
+        self.active_site = "independent_uat"
         # self.active_site = "independent_staging"
         # self.active_site = "standard"
         # self.active_site = "standard_dev_master"

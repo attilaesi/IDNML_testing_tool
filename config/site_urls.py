@@ -22,7 +22,6 @@ SITE_PROFILES = {
     "independent_uat": {
         "site_url": "https://uat-web.independent.co.uk",
         "urls": [
-            "https://uat-web.independent.co.uk/",
             "https://uat-web.independent.co.uk/sport/football/belarus-scotland-live-stream-score-result-world-cup-qualifier-b2822194.html",
             "https://uat-web.independent.co.uk/news/uk/home-news/golden-eagle-england-rsbp-b2809376.html",
             "https://uat-web.independent.co.uk/news/world/middle-east/qatar-explosion-israel-airstrike-hamas-doha-latest-news-b2823119.html",
