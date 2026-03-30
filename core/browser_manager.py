@@ -241,46 +241,6 @@ class BrowserManager:
                   }, 250);
                 }
 
-                // ------------------------------------------------------------
-                // GAM slot request store
-                // Hook via googletag.cmd so the listener is queued inside
-                // googletag's own init sequence — guaranteed to run before
-                // any refresh()/display() calls fire slotRequested events.
-                // ------------------------------------------------------------
-                window.__gamSlotRequests = [];
-                window.__gamSlotRequestHooked = false;
-
-                // Ensure the googletag stub exists (pages do this themselves,
-                // but we need it here in case our script runs first).
-                window.googletag = window.googletag || {};
-                window.googletag.cmd = window.googletag.cmd || [];
-
-                window.googletag.cmd.push(function () {
-                  try {
-                    if (window.__gamSlotRequestHooked) return;
-                    window.__gamSlotRequestHooked = true;
-                    console.log("[GAM hook] slotRequested listener registered");
-
-                    window.googletag.pubads().addEventListener("slotRequested", function (event) {
-                      try {
-                        const slot = event.slot;
-                        const keys = slot.getTargetingKeys ? slot.getTargetingKeys() : [];
-                        const targeting = {};
-                        keys.forEach(function (k) { targeting[k] = slot.getTargeting(k); });
-                        window.__gamSlotRequests.push({
-                          adUnit: slot.getAdUnitPath ? slot.getAdUnitPath() : null,
-                          slotId: slot.getSlotElementId ? slot.getSlotElementId() : null,
-                          targeting: targeting,
-                          ts: Date.now(),
-                        });
-                        console.log("[GAM hook] slotRequested captured:", slot.getAdUnitPath ? slot.getAdUnitPath() : "?");
-                      } catch (e) { /* ignore */ }
-                    });
-                  } catch (e) {
-                    console.log("[GAM hook] cmd.push error:", String(e));
-                  }
-                });
-
               } catch (e) {
                 // ignore top-level errors
               }
@@ -293,7 +253,6 @@ class BrowserManager:
         if not self.context:
             raise RuntimeError("Browser context not started. Call start() first.")
         page = await self.context.new_page()
-        page.on("console", lambda msg: print(f"  [browser] {msg.text}") if msg.text.startswith("[GAM hook]") else None)
         return page
 
     async def close(self):
