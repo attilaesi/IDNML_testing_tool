@@ -23,13 +23,7 @@ What counts as PASS / FAIL / SKIPPED
 from typing import Dict, Any, List
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class GptSlotDumpProbeTest(BaseTest):
-    NORMALIZED_NAME = "gpt_slot_dump_probe_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """Debug probe: dump GPT slots and targeting."""
 

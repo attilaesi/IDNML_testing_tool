@@ -49,13 +49,7 @@ from core.url_context_helpers import (
     has_explicit_ctx,
 )
 
-
 class PbjsVideoBidderPresenceTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_video_bidder_presence_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     name = "PbjsVideoBidderPresenceTest"
 

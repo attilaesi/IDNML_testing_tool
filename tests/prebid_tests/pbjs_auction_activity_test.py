@@ -3,13 +3,7 @@
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
 
-
 class PbjsAuctionActivityTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_auction_activity_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """
     Verifies that a Prebid auction has actually produced bids (as far as we can see).

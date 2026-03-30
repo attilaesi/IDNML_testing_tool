@@ -1,12 +1,6 @@
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class PbjsVideoPubcidPresenceTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_pubcid_presence_video_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """
     Validate PubCommonId (pubcid) for VIDEO auctions only (hero_player).

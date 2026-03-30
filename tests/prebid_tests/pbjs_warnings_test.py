@@ -3,13 +3,7 @@ from typing import Any, Dict, List
 
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class PbjsPrebidWarningsTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_warnings_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     name = "PbjsPrebidWarningsTest"
 

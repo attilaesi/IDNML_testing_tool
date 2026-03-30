@@ -1,4 +1,5 @@
 # main.py
+import argparse
 import asyncio
 import time
 from collections import defaultdict
@@ -199,20 +200,36 @@ def _per_url_summary(executed_results, url_order: List[str]) -> List[Tuple[str, 
 
 
 async def main():
+    parser = argparse.ArgumentParser(description="Ad Testing Framework")
+    parser.add_argument(
+        "--test",
+        metavar="TEST_NAME",
+        help="Run only this test (e.g. gpt_gam_bid_keys_test). Omit to run all tests.",
+    )
+    args = parser.parse_args()
+
     print("🚀 Ad Testing Framework")
     print(f"Active site: {CONFIG.get('active_site', '')}")
     print(f"Site URL: {CONFIG.get('site_url', '')}")
     print(f"Max pages: {CONFIG.get('max_pages', 10)}")
     print(f"Mobile mode: {CONFIG.get('mobile', False)}")
     print(f"Headless: {CONFIG.get('headless', True)}")
+    if args.test:
+        print(f"🎯 Single-test mode: {args.test}")
     print("-" * 50)
 
     framework = TestFramework(CONFIG)
     framework.discover_tests()
 
-    # Run everything
+    if args.test and args.test not in framework.tests:
+        known = sorted(framework.tests.keys())
+        print(f"❌ Test '{args.test}' not found. Known tests:\n" + "\n".join(f"  {t}" for t in known))
+        return
+
+    # Run one test or all
+    test_names = [args.test] if args.test else None
     _t_start = time.monotonic()
-    results = await framework.run_tests()
+    results = await framework.run_tests(test_names=test_names)
     _elapsed = time.monotonic() - _t_start
 
     # ------------------------------------------------------------------

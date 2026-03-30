@@ -1,12 +1,6 @@
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class PbjsDisplayPubcidPresenceTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_pubcid_presence_display_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """
     Validate PubCommonId (pubcid) for DISPLAY auctions only.

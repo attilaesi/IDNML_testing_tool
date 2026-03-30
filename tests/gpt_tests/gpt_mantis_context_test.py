@@ -30,13 +30,7 @@ from typing import List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
 
-
 class GptMantisContextTest(GptBaseTest):
-    NORMALIZED_NAME = "gpt_mantis_context_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """Validate GPT 'mantis_context' targeting shape when present."""
 

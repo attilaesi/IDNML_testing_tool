@@ -45,13 +45,7 @@ from core.url_context_helpers import (
     has_explicit_ctx,
 )
 
-
 class PbjsDisplayBidderPresenceTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_display_bidder_presence_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     name = "PbjsDisplayBidderPresenceTest"
 

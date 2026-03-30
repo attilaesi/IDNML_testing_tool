@@ -1,13 +1,7 @@
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
 
-
 class PbjsAdUnitConfigurationTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_adunit_configuration_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """
     Validates Prebid ad unit configuration.

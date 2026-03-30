@@ -33,13 +33,7 @@ from typing import Dict, Any, List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
 
-
 class GptArticleIdTest(GptBaseTest):
-    NORMALIZED_NAME = "gpt_article_id_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """Validate GPT article identifier targeting on article-like pages."""
 

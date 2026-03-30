@@ -28,13 +28,7 @@ What counts as PASS / FAIL / SKIPPED
 from typing import Dict, Any
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class GptReferrerTest(BaseTest):
-    NORMALIZED_NAME = "gpt_referrer_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """Sanity-check GPT 'referrer' vs document.referrer when present."""
 

@@ -51,13 +51,7 @@ from typing import Any, Dict
 
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class PbjsConsentIntegrationTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_consent_integration_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """Check that Prebid consentManagement is correctly configured."""
 

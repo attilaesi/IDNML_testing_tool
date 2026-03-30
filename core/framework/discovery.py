@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Type, Tuple
 
-from core.base_test import BaseTest
+from core.base_test import BaseTest, _to_snake
 
 
 def _iter_test_module_names() -> List[str]:
@@ -86,9 +86,10 @@ def discover_tests() -> Tuple[Dict[str, Type[BaseTest]], Dict[str, List[str]]]:
             if not issubclass(obj, BaseTest) or obj is BaseTest:
                 continue
 
-            tests[name] = obj
-            test_categories[category].append(name)
-            print(f"Discovered test: {name} in category {category}")
+            snake = _to_snake(name)
+            tests[snake] = obj
+            test_categories[category].append(snake)
+            print(f"Discovered test: {snake} in category {category}")
 
     return tests, test_categories
 

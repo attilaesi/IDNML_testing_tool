@@ -16,15 +16,23 @@ class TestConfig:
         # Which site profile to use:
         #   "independent", "independent_uat", "independent_staging",
         #   "standard", "standard_uat", "standard_staging"
-        # self.active_site = "independent"
-        self.active_site = "independent_uat"
+        self.active_site = "independent"
+        # self.active_site = "independent_uat"
         # self.active_site = "independent_staging"
         # self.active_site = "standard"
         # self.active_site = "standard_dev_master"
 
+        # Independent feature branch override.
+        # When set, uses the "independent" URL list but replaces the live domain
+        # with this base URL. Cookies (incl. feed=prod) are applied automatically
+        # because "feat" appears in the hostname.
+        # Example:
+        #   self.indy_feat_branch = "https://indy-2739-chore-remove-snippetcontent-web.independent.co.uk"
+        self.indy_feat_branch = None
+
         # Browser-level settings
         self.browser_config = {
-            "headless": True,
+            "headless": False,
             # For now this is the single switch; we’ll refactor to device_mode later
             "mobile": True,
             # Playwright default timeout (ms)
@@ -51,7 +59,7 @@ class TestConfig:
             "warmup_pages": 3,             # number of pages to run before testing start
 
             # 🔸 Global trace switch for extra console logging in tests
-            "trace": False,
+            "trace": True,
         }
 
         # Output configuration
@@ -86,11 +94,22 @@ class TestConfig:
         site_key = str(self.active_site).lower()
         site_profile = SITE_PROFILES[site_key]
 
-        config["active_site"] = site_key
-        config["site_url"] = site_profile["site_url"]
+        if self.indy_feat_branch:
+            # Swap the UAT Independent domain for the feature branch base URL.
+            live_base = SITE_PROFILES["independent_uat"]["site_url"].rstrip("/")
+            feat_base = self.indy_feat_branch.rstrip("/")
+            all_urls = [
+                u.replace(live_base, feat_base)
+                for u in SITE_PROFILES["independent_uat"]["urls"]
+            ]
+            config["active_site"] = "independent_feat"
+            config["site_url"] = feat_base
+        else:
+            config["active_site"] = site_key
+            config["site_url"] = site_profile["site_url"]
+            all_urls = site_profile["urls"]
 
         # Single URL set per site and trim to max_pages
-        all_urls = site_profile["urls"]
         max_pages = config.get("max_pages", 10)
         config["urls"] = all_urls[:max_pages]
 

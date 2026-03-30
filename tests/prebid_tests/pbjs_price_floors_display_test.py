@@ -5,13 +5,7 @@ from typing import Any, Dict, List, Optional
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
 
-
 class PbjsPriceFloorsDisplayTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_price_floors_display_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """
     Validates Prebid price floors configuration for DISPLAY auctions.

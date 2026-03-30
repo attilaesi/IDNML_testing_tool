@@ -32,13 +32,7 @@ from typing import Dict, Any, List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
 
-
 class GptCategory2Test(GptBaseTest):
-    NORMALIZED_NAME = "gpt_category2_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """Validate GPT category2 targeting on article-like pages (if used)."""
 

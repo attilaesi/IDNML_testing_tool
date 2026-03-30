@@ -38,13 +38,7 @@ from typing import Any, Dict, List
 
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class PbjsHeroPlayerPlacementTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_hero_player_placement_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     name = "PbjsHeroPlayerPlacementTest"
 

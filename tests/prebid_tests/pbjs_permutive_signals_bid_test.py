@@ -20,9 +20,7 @@ from typing import Dict, List, Any
 
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class PbjsPermutiveSignalsBidTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_permutive_signals_bid_test"
 
     """Checks Permutive signals inside bid requests."""
 
@@ -51,10 +49,6 @@ class PbjsPermutiveSignalsBidTest(BaseTest):
         }
         for bidder in REQUIRED_BIDDERS
     }
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     # --- Token match helpers ---
 

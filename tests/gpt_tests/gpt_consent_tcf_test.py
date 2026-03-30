@@ -38,13 +38,7 @@ from typing import Dict, Any
 
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class GptConsentTcfTest(BaseTest):
-    NORMALIZED_NAME = "gpt_consent_tcf_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """Validate TCF consent exposure based on Locale cookie."""
 

@@ -7,7 +7,7 @@ from typing import List, Dict, Type, Optional
 from urllib.parse import urlparse
 
 from core.readiness_waiter import ReadinessWaiter
-from core.base_test import BaseTest, TestResult, TestState
+from core.base_test import BaseTest, TestResult, TestState, _to_snake
 from core.browser_manager import BrowserManager
 from core.cmp_handler import CMPHandler
 from core.data_extractor import DataExtractor  # noqa: F401 (used by tests)
@@ -94,7 +94,11 @@ class TestFramework:
         raw_l = (raw or "").lower()
 
         # UAT/FEAT/DEV get feature-flag cookies; STAGING does not.
-        is_uat_like = any(tok in raw_l for tok in ("uat", "feat", "dev"))
+        # Also treat "independent_feat" active_site as UAT-like (branch names vary).
+        is_uat_like = (
+            any(tok in raw_l for tok in ("uat", "feat", "dev"))
+            or self.config.get("active_site", "") == "independent_feat"
+        )
         is_staging = "staging" in raw_l
         apply_preprod_cookies = is_uat_like and not is_staging
 
@@ -580,7 +584,7 @@ class TestFramework:
         site_plan = SITE_TEST_PLANS.get(publisher, {})
 
         def _class_name(cls: Type[BaseTest]) -> str:
-            return getattr(cls, "name", cls.__name__)
+            return _to_snake(cls.__name__)
 
         if site_plan and site_plan.get("exclude") is not None:
             excluded_site = set(site_plan.get("exclude", []))
@@ -680,6 +684,11 @@ class TestFramework:
                 _progress_end(prefix, colour_state(result.state.value))
                 if result.state in (TestState.FAILED, TestState.ERROR):
                     msgs = result.errors if result.errors else result.warnings
+                    if msgs:
+                        first = str(msgs[0]).strip().splitlines()[0][:120]
+                        print(dim(f"{'':>{len(prefix)}}  ↳ {first}"))
+                elif result.state == TestState.SKIPPED:
+                    msgs = result.warnings if result.warnings else result.errors
                     if msgs:
                         first = str(msgs[0]).strip().splitlines()[0][:120]
                         print(dim(f"{'':>{len(prefix)}}  ↳ {first}"))

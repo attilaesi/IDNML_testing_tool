@@ -23,9 +23,7 @@ import re
 
 from core.base_test import BaseTest, TestResult, TestState
 
-
 class PbjsMantisSignalsBidTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_mantis_signals_bid_test"
 
     # ORTB2 paths we inspect and record into diag
     PATH_KEYS: List[str] = [
@@ -42,10 +40,6 @@ class PbjsMantisSignalsBidTest(BaseTest):
     # Strict patterns (Option C)
     _MANTIS_ENTRY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*-(GREEN|AMBER|RED)$")
     _MANTIS_CONTEXT_ENTRY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     # --- Setup ---
 

@@ -2,6 +2,12 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 from enum import Enum
 import asyncio
+import re
+
+
+def _to_snake(name: str) -> str:
+    """Convert PascalCase class name to snake_case (e.g. GptCategory1Test → gpt_category1_test)."""
+    return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 
 class TestState(Enum):
     PENDING = "pending"
@@ -25,7 +31,7 @@ class TestResult:
 class BaseTest(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.name = self.__class__.__name__
+        self.name = _to_snake(self.__class__.__name__)
         self.description = self.__doc__ or "No description provided"
         self.category = self._get_category()
         

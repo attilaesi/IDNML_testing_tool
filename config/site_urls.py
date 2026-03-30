@@ -24,8 +24,6 @@ SITE_PROFILES = {
         "urls": [
             "https://uat-web.independent.co.uk/sport/football/belarus-scotland-live-stream-score-result-world-cup-qualifier-b2822194.html",
             "https://uat-web.independent.co.uk/news/uk/home-news/golden-eagle-england-rsbp-b2809376.html",
-            "https://uat-web.independent.co.uk/news/world/middle-east/qatar-explosion-israel-airstrike-hamas-doha-latest-news-b2823119.html",
-            "https://uat-web.independent.co.uk/news/test-test-test-snp-kirsty-blackman-commons-mps-children-b2823608.html",
             "https://uat-web.independent.co.uk/climate-change/news/shark-teeth-ocean-acidification-co2-b2814061.html",
             "https://uat-web.independent.co.uk/news/uk/home-news/food-hunger-crisis-britain-trussell-report-poverty-b2822926.html",
         ],

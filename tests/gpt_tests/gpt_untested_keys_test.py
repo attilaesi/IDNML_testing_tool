@@ -28,13 +28,7 @@ from typing import List, Set
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
 
-
 class GptUntestedKeysTest(GptBaseTest):
-    NORMALIZED_NAME = "gpt_untested_keys_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """List GPT targeting keys that have no explicit test."""
 

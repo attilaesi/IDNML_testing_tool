@@ -2,13 +2,7 @@ from core.base_test import BaseTest, TestResult, TestState
 from config.test_settings import get_geo_config
 from utils.geo_utils import detect_geo_from_cookies
 
-
 class PbjsIdentityModulesTest(BaseTest):
-    NORMALIZED_NAME = "pbjs_identity_modules_test"
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.name = self.NORMALIZED_NAME
 
     """
     Validate that the expected identity modules are configured for the current geo.
