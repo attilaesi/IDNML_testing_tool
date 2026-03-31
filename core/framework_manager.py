@@ -501,6 +501,21 @@ class TestFramework:
         waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
         await waiter.wait_for_prebid_and_gpt(page)
 
+        await page.evaluate("""
+            async () => {
+                const delay = ms => new Promise(r => setTimeout(r, ms));
+                const total = document.body.scrollHeight;
+                const step = Math.max(600, Math.floor(total / 12));
+                for (let y = 0; y < total; y += step) {
+                    window.scrollTo(0, y);
+                    await delay(150);
+                }
+                window.scrollTo(0, total);
+                await delay(300);
+                window.scrollTo(0, 0);
+            }
+        """)
+
         print(f"[WARMUP {warm_idx}/{total_warm}] done")
 
     # ------------- Per-URL runner -------------
@@ -537,6 +552,23 @@ class TestFramework:
         # Wait until pbjs & GPT are fully ready
         waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
         await waiter.wait_for_prebid_and_gpt(page)
+
+        # Scroll through the full page to trigger lazy-loaded ad slots,
+        # then return to top before tests run.
+        await page.evaluate("""
+            async () => {
+                const delay = ms => new Promise(r => setTimeout(r, ms));
+                const total = document.body.scrollHeight;
+                const step = Math.max(600, Math.floor(total / 12));
+                for (let y = 0; y < total; y += step) {
+                    window.scrollTo(0, y);
+                    await delay(150);
+                }
+                window.scrollTo(0, total);
+                await delay(300);
+                window.scrollTo(0, 0);
+            }
+        """)
 
         # Detect page type from GPT key-values (with small polling window)
         page_type_norm = await self._detect_page_type(page)

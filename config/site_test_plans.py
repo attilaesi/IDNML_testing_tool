@@ -25,9 +25,10 @@ SITE_TEST_PLANS = {
         ],
         "exclude_by_page_type": {
             "image": [],
-            "index": [],
+            "index": ["layout_ad_sequence_test"],
             "video": [],
             "gallery": [],
+            "liveblog": ["layout_ad_sequence_test"],
         },
     },
 
@@ -44,6 +45,8 @@ SITE_TEST_PLANS = {
             "gpt_liveblog_test",
         ],
         "exclude_by_page_type": {
+            "index": ["layout_ad_sequence_test"],
+            "liveblog": ["layout_ad_sequence_test"],
             "image": [
                 "pbjs_adunit_configuration_test",
                 "pbjs_auction_activity_test",

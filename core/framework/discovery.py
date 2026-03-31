@@ -74,6 +74,8 @@ def discover_tests() -> Tuple[Dict[str, Type[BaseTest]], Dict[str, List[str]]]:
             category = "PREBID"
         elif ".gpt_tests." in module_name:
             category = "GPT"
+        elif ".layout_tests." in module_name:
+            category = "LAYOUT"
         else:
             category = "OTHER"
 

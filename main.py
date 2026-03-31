@@ -312,14 +312,36 @@ async def main():
                 print(f"\n• {test_name}  {state_label}  {red(f'({fail_count}/{total_urls} URLs)')}")
                 # Sort by URL order
                 rs_sorted = sorted(rs, key=lambda r: url_order.index(r.url) if r.url in url_order else 999)
+                # Group URLs that share an identical error fingerprint
+                from collections import OrderedDict
+                fingerprint_groups: "OrderedDict[str, list]" = OrderedDict()
                 for r in rs_sorted:
-                    label = url_to_label.get(r.url, r.url)
-                    page_type = url_to_pagetype.get(r.url, "unknown")
-                    print(f"  {label}  [{page_type}]  {dim(r.url)}")
                     msgs = r.errors if r.errors else r.warnings
-                    for entry in (msgs or []):
-                        for line in str(entry).splitlines():
-                            print(dim("      - " + line))
+                    fingerprint = "\n".join(str(m) for m in (msgs or []))
+                    if fingerprint not in fingerprint_groups:
+                        fingerprint_groups[fingerprint] = []
+                    fingerprint_groups[fingerprint].append(r)
+
+                for fingerprint, group_rs in fingerprint_groups.items():
+                    if len(group_rs) == 1:
+                        r = group_rs[0]
+                        label = url_to_label.get(r.url, r.url)
+                        page_type = url_to_pagetype.get(r.url, "unknown")
+                        print(f"  {label}  [{page_type}]  {dim(r.url)}")
+                        layout_ctx = (getattr(r, "metadata", None) or {}).get("layout_context")
+                        if layout_ctx:
+                            print(f"  {dim('[' + layout_ctx + ']')}")
+                    else:
+                        labels = ", ".join(
+                            f"{url_to_label.get(r.url, r.url)} [{url_to_pagetype.get(r.url, '?')}]"
+                            for r in group_rs
+                        )
+                        print(f"  {labels}")
+                        layout_ctx = (getattr(group_rs[0], "metadata", None) or {}).get("layout_context")
+                        if layout_ctx:
+                            print(f"  {dim('[' + layout_ctx + ']')}")
+                    for line in fingerprint.splitlines():
+                        print(dim("      - " + line))
 
     # ------------------------------------------------------------------
     # PASSED DETAILS — grouped by test, listing passing URLs
