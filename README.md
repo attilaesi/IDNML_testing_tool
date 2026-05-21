@@ -1,10 +1,181 @@
 # Ad Testing Framework
 
-A modular framework for testing ad implementations, focusing on prebid and GPT validation.
+A modular, async Playwright-based framework for validating ad implementations across Independent and Standard Media Group sites. Tests cover Prebid.js configuration, GPT key-value targeting, layout/ad-sequence rules, and environment integrity.
+
+---
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
 playwright install chromium
-python main.py
+
+# Run all tests against the active site profile
+python -m tasks.run_tests
+
+# Run a single test
+python -m tasks.run_tests --test pbjs_display_bidder_presence_test
+
+# Override the site profile
+python -m tasks.run_tests --site independent_uat
+```
+
+---
+
+## Project Structure
+
+```
+config/
+  base_config.py        — Master config: site, device, timeouts, feature flags
+  device_config.py      — Playwright device profile selector (ACTIVE_DEVICE)
+  site_urls.py          — URL sets per site profile
+  site_test_plans.py    — Per-publisher test exclusion rules
+
+core/
+  framework_manager.py  — Main orchestrator: crawl, run tests, output matrix
+  browser_manager.py    — Playwright context creation (device profile, auth, Prebid hooks)
+  base_test.py          — BaseTest / TestResult / TestState base classes
+  device_helpers.py     — Viewport-based device type detection (mobile vs desktop)
+  cmp_handler.py        — Consent banner dismissal
+  readiness_waiter.py   — Wait for Prebid + GPT to be ready on page
+  supabase_helpers.py   — Supabase credential resolution for bidder config queries
+  url_context_helpers.py— Publisher/env/page-type detection from URL
+
+tasks/
+  run_tests.py          — CLI entry point: discover and run all ad tests
+  run_crawler.py        — Sitemap-based URL crawler entry point
+  common.py             — Shared output/summary helpers
+
+tests/
+  environment_tests/    — Site environment integrity checks
+  gpt_tests/            — Google Publisher Tag key-value targeting tests
+  prebid_tests/         — Prebid.js auction, bidder, and signal tests
+  layout_tests/         — Ad slot layout, sequence, and Taboola load tests
+```
+
+---
+
+## Configuration
+
+### Switching sites
+
+Edit `config/base_config.py` and set `self.active_site`:
+
+| Value | Environment |
+|---|---|
+| `"independent"` | Production |
+| `"independent_uat"` | UAT / pre-prod |
+| `"independent_staging"` | Staging |
+| `"standard"` | Standard Media production |
+| `"standard_uat"` | Standard Media UAT |
+| `"standard_dev_master"` | Standard Media dev master |
+
+### Switching device
+
+Edit `config/device_config.py` and set `ACTIVE_DEVICE` to any Playwright device name from the commented list (Desktop Chrome, iPhone 15 Pro, iPad Pro 11, Pixel 7, etc.).
+
+### Feature branch testing
+
+```python
+# base_config.py
+self.indy_feat_branch = "https://indy-2739-chore-my-branch.independent.co.uk"
+```
+
+This swaps the UAT domain for the feature branch URL across all configured test pages.
+
+### Light ad rules
+
+```python
+self.light_ad_rules = True   # force feat__use_light_ad_rules=true
+self.light_ad_rules = False  # force feat__use_light_ad_rules=false
+self.light_ad_rules = None   # leave unset (page default)
+```
+
+---
+
+## Tests
+
+### Environment tests
+| Test | What it checks |
+|---|---|
+| `env_is_mobile_or_tablet_test` | `is_mobile_or_tablet` cookie matches viewport on all environments |
+
+### GPT tests (Google Publisher Tag)
+| Test | What it checks |
+|---|---|
+| `gpt_page_type_test` | `pageType` key-value present and valid |
+| `gpt_article_id_test` | Article ID key-value present on article pages |
+| `gpt_category1_test` / `gpt_category2_test` | Category targeting keys |
+| `gpt_mantis_test` / `gpt_mantis_context_test` | Mantis contextual signals |
+| `gpt_permutive_composite_test` | Permutive audience composite key |
+| `gpt_consent_tcf_test` | TCF consent string present |
+| `gpt_cmp_active_test` | CMP active flag |
+| `gpt_gdpr_key_test` | GDPR targeting key |
+| `gpt_gam_bid_keys_test` | GAM bid price keys set by Prebid |
+| `gpt_autorefresh_test` | Auto-refresh slot targeting |
+| `gpt_commercial_test` | Commercial targeting key |
+| `gpt_reg_gate_test` | Registration gate targeting key |
+| `gpt_referrer_test` | Referrer targeting key |
+| `gpt_liveblog_test` | Liveblog targeting key on liveblog pages |
+| `gpt_longread_test` | Long-read targeting key |
+| `gpt_testgroup_test` | Test-group targeting key |
+| `gpt_topictags_test` | Topic tag targeting keys |
+| `gpt_content_sources_test` | Content source targeting key |
+| `gpt_anonymised_key_test` | Anonymised user targeting key |
+| `gpt_slot_dump_probe_test` | Probe that dumps all slot targeting for debugging |
+| `gpt_untested_keys_test` | Flags any GAM keys not covered by other tests |
+
+### Prebid tests
+| Test | What it checks |
+|---|---|
+| `pbjs_display_bidder_presence_test` | Expected display bidders present and active |
+| `pbjs_video_bidder_presence_test` | Expected video bidders present and active |
+| `pbjs_hero_player_placement_test` | Hero player ad unit configured correctly |
+| `pbjs_price_floors_display_test` | Price floors set for display |
+| `pbjs_price_floors_video_test` | Price floors set for video |
+| `pbjs_pubcid_presence_display_test` | PubCID module active for display |
+| `pbjs_pubcid_presence_video_test` | PubCID module active for video |
+| `pbjs_auction_activity_test` | Auction fired and received bids |
+| `pbjs_adunit_configuration_test` | Ad unit config is valid |
+| `pbjs_consent_integration_test` | Prebid consent integration |
+| `pbjs_identity_modules_test` | Identity modules loaded |
+| `pbjs_mantis_signals_bid_test` | Mantis signals passed into bids |
+| `pbjs_permutive_signals_bid_test` | Permutive signals passed into bids |
+| `pbjs_timeout_config_test` | Bid timeout configured correctly |
+| `pbjs_warnings_test` | No unexpected Prebid warnings |
+| `pbjs_environment_test` | Prebid version and environment checks |
+
+### Layout tests
+| Test | What it checks |
+|---|---|
+| `layout_ad_sequence_test` | Ad slots appear in the expected order in the DOM |
+| `taboola_load_time_test` | Taboola widget loads within the acceptable time budget |
+
+---
+
+## Output
+
+- **Terminal matrix** — pass/fail grid (tests × URLs) printed after each run, with ANSI colour coding
+- **CSV** — `output/output.csv` (per test × URL), `output/output_by_pagetype.csv` (aggregated by page type)
+- **Text report** — `output/` directory
+
+---
+
+## Site Test Plans
+
+`config/site_test_plans.py` maps each publisher to a set of test exclusion rules:
+- `exclude` — tests never run on this publisher
+- `exclude_by_page_type` — tests excluded for specific page types (e.g. video, article)
+
+Tests in the `ENVIRONMENT` category are always exempt from site plan exclusions.
+
+---
+
+## Architecture Notes
+
+- **Device detection** — Playwright's built-in device profiles set viewport, UA, touch, and `is_mobile`. `core/device_helpers.py` derives `mobile`/`desktop` from viewport aspect ratio (portrait = mobile).
+- **Prebid event capture** — A `context.add_init_script` hook fires before every page script and attaches `pbjs.onEvent` listeners, splitting events into `display` and `video` streams (`__pbjsBidEventsDisplay` / `__pbjsBidEventsVideo`).
+- **Basic auth** — Pre-prod credentials are passed via Playwright `http_credentials`, not via URL injection (which breaks `History.replaceState` and `fetch` on some pages).
+- **CMP** — Consent is handled once per session on the first URL; subsequent pages inherit the accepted consent from the shared browser context.
+- **Warmup** — Configurable warmup phase loads N pages before testing starts to prime the browser context and consent state.
+- **Parallel mode** — URLs can be tested in parallel using a bounded semaphore (`concurrency` in config). Each parallel worker gets its own page within the shared browser context.
