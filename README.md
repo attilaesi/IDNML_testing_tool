@@ -171,6 +171,78 @@ Tests in the `ENVIRONMENT` category are always exempt from site plan exclusions.
 
 ---
 
+## Google Sheets Output
+
+After each run, the framework can create a new timestamped Google Spreadsheet containing colour-coded results. The spreadsheet URL is printed at the end of the run and the sheet is shared directly to your Google account.
+
+### Sheet layout
+
+| Tab | Contents |
+|---|---|
+| **Summary** | Run header · per-device pass-rate table · cross-device comparison matrix with clickable hyperlinks from FAIL/MIXED cells to the exact row in the relevant device tab |
+| **desktop** | Test × URL matrix · failure details · URL key |
+| **mobile_ios** | Same layout |
+| **mobile_android** | Same layout |
+| **tablet** | Same layout |
+
+Colour key: green = PASS · red = FAIL · dark red = ERROR · amber = MIXED · grey = SKIP/SKIP
+
+### Google Cloud setup (one-time)
+
+**1. Create a Google Cloud project**
+- Go to [console.cloud.google.com](https://console.cloud.google.com)
+- Create a new project (or select an existing one)
+
+**2. Enable APIs**
+- In the project, go to **APIs & Services → Library**
+- Search for and enable **Google Sheets API**
+- Search for and enable **Google Drive API**
+
+**3. Create a service account**
+- Go to **APIs & Services → Credentials → Create Credentials → Service Account**
+- Give it a name (e.g. `ad-testing-bot`)
+- No roles are needed at the project level — click through to finish
+- On the service account detail page, go to **Keys → Add Key → Create new key → JSON**
+- Download the JSON file and store it somewhere safe (e.g. `~/.config/ad-testing-sa.json`)
+
+**4. Configure the env var**
+
+```bash
+# Add to your shell profile (~/.zshrc or ~/.bash_profile):
+export GOOGLE_SERVICE_ACCOUNT_JSON="/path/to/your/service-account-key.json"
+
+# Or, for CI pipelines, set it to the JSON content directly:
+export GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account", ...}'
+```
+
+**5. Enable Sheets output in config**
+
+```python
+# config/base_config.py
+self.sheets_config = {
+    "sheets_enabled": True,
+    "sheets_share_email": "you@independent.co.uk",  # your Google account
+}
+```
+
+Or set `SHEETS_SHARE_EMAIL` as an env var instead.
+
+When the run completes, the new spreadsheet is created in the service account's Drive and shared with your email — it will appear in **"Shared with me"** in Google Drive.
+
+### Running with Sheets output
+
+```bash
+# Single-device run
+python -m tasks.run_tests
+
+# Multi-device run
+python -m tasks.run_multi_device
+```
+
+Both runners check `sheets_enabled` and write a sheet if it is `True`. Each run creates a new spreadsheet (nothing is overwritten).
+
+---
+
 ## Multi-Device Testing
 
 Run all tests across a canonical four-device suite in one command:

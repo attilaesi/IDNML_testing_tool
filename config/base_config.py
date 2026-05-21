@@ -80,6 +80,23 @@ class TestConfig:
             "cmp_debug_dir": "output/cmp_debug",
         }
 
+        # ─────────────────────────────────────────────────────────────
+        # Google Sheets output
+        # ─────────────────────────────────────────────────────────────
+        # Set sheets_enabled = True to write a new timestamped Google Sheet
+        # at the end of every run (single-device and multi-device).
+        #
+        # Requires GOOGLE_SERVICE_ACCOUNT_JSON env var — see README for setup.
+        #
+        # sheets_share_email: your personal Google account email.
+        #   The new sheet will be shared with this address automatically
+        #   so it appears in your "Shared with me" Drive folder.
+        #   Can also be set via SHEETS_SHARE_EMAIL env var.
+        self.sheets_config = {
+            "sheets_enabled": False,
+            "sheets_share_email": "",  # e.g. "you@independent.co.uk"
+        }
+
         # Feature flag cookies for preprod (UAT / staging)
         # NOTE: application of these cookies should be decided from the URL
         # (uat-web / staging-web / feat / dev) in framework_manager.
@@ -98,6 +115,7 @@ class TestConfig:
         config.update(self.test_config)
         config.update(self.output_config)
         config.update(self.taboola_config)
+        config.update(self.sheets_config)
 
         # Attach cookies (application is decided in framework_manager based on URL)
         config["preprod_cookies"] = self.preprod_cookies

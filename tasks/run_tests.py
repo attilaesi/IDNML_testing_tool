@@ -5,9 +5,11 @@
 import argparse
 import asyncio
 import time
+from datetime import datetime
 
 from config.base_config import TestConfig
 from core.framework_manager import TestFramework
+from core.device_helpers import device_label
 from tasks.common import print_results
 
 VALID_SITES = [
@@ -68,6 +70,27 @@ async def main():
             await framework.csv_writer.write_text_report(results, urls=url_order)
         except Exception:
             pass
+
+    # Google Sheets output (single-device run — one device tab + Summary)
+    if bool(CONFIG.get("sheets_enabled", False)) and results:
+        from core.sheets_writer import SheetsWriter
+        from core.url_context_helpers import env_from_url
+        dev_key = CONFIG.get("device_key") or device_label(CONFIG)
+        dev_name = CONFIG.get("device_name", "")
+        run_meta = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "site": CONFIG.get("active_site", ""),
+            "env": env_from_url(CONFIG.get("site_url", "")),
+            "device_names": {dev_key: dev_name},
+        }
+        writer = SheetsWriter(CONFIG)
+        sheet_url = await writer.write_report(
+            all_results=results,
+            device_keys=[dev_key],
+            run_meta=run_meta,
+        )
+        if sheet_url:
+            print(f"\n📊 Google Sheet: {sheet_url}")
 
     print()
 

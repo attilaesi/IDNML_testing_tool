@@ -13,12 +13,14 @@ import argparse
 import asyncio
 import copy
 import time
+from datetime import datetime
 from typing import List, Optional
 
 from config.base_config import TestConfig
 from config.device_config import DEVICE_SUITE
 from core.framework_manager import TestFramework
 from core.ansi import dim
+from core.url_context_helpers import env_from_url
 from tasks.common import print_results, _get_url_order
 
 VALID_SITES = [
@@ -184,6 +186,24 @@ async def main():
         await combined_fw.csv_writer.write_pagetype_summary(all_results)
     except Exception as e:
         print(dim(f"⚠️  CSV write error: {e}"))
+
+    # Google Sheets output
+    if bool(combined_config.get("sheets_enabled", False)) and all_results:
+        from core.sheets_writer import SheetsWriter
+        run_meta = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "site": combined_config.get("active_site", ""),
+            "env": env_from_url(combined_config.get("site_url", "")),
+            "device_names": dict(active_suite),
+        }
+        writer = SheetsWriter(combined_config)
+        sheet_url = await writer.write_report(
+            all_results=all_results,
+            device_keys=list(active_suite.keys()),
+            run_meta=run_meta,
+        )
+        if sheet_url:
+            print(f"\n📊 Google Sheet: {sheet_url}")
 
     mins, secs = divmod(int(total_elapsed), 60)
     print(f"\n✅ Multi-device run complete  ({mins}m {secs}s total)\n")
