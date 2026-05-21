@@ -34,7 +34,8 @@ def _make_device_config(base_cfg: TestConfig, device_key: str, device_name: str)
     """
     cfg = base_cfg.get_config()
     cfg["device_name"] = device_name
-    cfg["print_matrix_summary"] = True   # each device prints its own matrix
+    cfg["device_key"] = device_key     # used by framework to tag results correctly
+    cfg["print_matrix_summary"] = True  # each device prints its own matrix
     return cfg
 
 

@@ -740,7 +740,7 @@ class TestFramework:
                 result = await test.run(page, url)
 
                 # Attach page_type, locale, device and GLOBAL CONTEXT TRACE into metadata
-                result.device = device_label(self.config)
+                result.device = self.config.get("device_key") or device_label(self.config)
                 try:
                     if hasattr(result, "metadata"):
                         if result.metadata is None:
@@ -768,7 +768,7 @@ class TestFramework:
             except Exception as e:
                 err_result = TestResult(test_name)
                 err_result.url = url
-                err_result.device = device_label(self.config)
+                err_result.device = self.config.get("device_key") or device_label(self.config)
                 err_result.state = TestState.ERROR
                 err_result.errors.append(str(e))
                 try:
