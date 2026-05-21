@@ -70,7 +70,9 @@ def discover_tests() -> Tuple[Dict[str, Type[BaseTest]], Dict[str, List[str]]]:
             continue
 
         # Determine category from folder name (informational only)
-        if ".prebid_tests." in module_name:
+        if ".environment_tests." in module_name:
+            category = "ENVIRONMENT"
+        elif ".prebid_tests." in module_name:
             category = "PREBID"
         elif ".gpt_tests." in module_name:
             category = "GPT"

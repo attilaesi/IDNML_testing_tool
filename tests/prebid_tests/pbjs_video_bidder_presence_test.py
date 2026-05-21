@@ -38,10 +38,10 @@ PASSED:
 """
 
 from typing import Any, Dict, List, Set
-import os
 import aiohttp
 
-from core.base_test import BaseTest, TestResult, TestState
+from core.base_test import VideoOnlyTest, TestResult, TestState
+from core.supabase_helpers import get_supabase_credentials, is_supabase_configured
 from core.url_context_helpers import (
     map_pagetype_to_db,
     get_context_publisher,
@@ -49,11 +49,11 @@ from core.url_context_helpers import (
     has_explicit_ctx,
 )
 
-class PbjsVideoBidderPresenceTest(BaseTest):
+class PbjsVideoBidderPresenceTest(VideoOnlyTest):
 
     name = "PbjsVideoBidderPresenceTest"
 
-    async def setup(self, page, url: str) -> bool:
+    async def _video_setup(self, page, url: str) -> bool:
         try:
             await page.wait_for_load_state("domcontentloaded")
         except Exception:
@@ -213,16 +213,7 @@ class PbjsVideoBidderPresenceTest(BaseTest):
         geo: str,
         page_type: str,
     ) -> List[str]:
-        supabase_url = (
-            self.config.get("supabase_url")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-            or os.getenv("SUPABASE_URL")
-        )
-        supabase_key = (
-            self.config.get("supabase_anon_key")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-            or os.getenv("SUPABASE_ANON_KEY")
-        )
+        supabase_url, supabase_key = get_supabase_credentials(self.config)
         table = self.config.get("supabase_bidders_table", "bidder_configs_enriched")
 
         if not supabase_url or not supabase_key:
@@ -286,14 +277,9 @@ class PbjsVideoBidderPresenceTest(BaseTest):
             result.warnings.append("window.pbjs not present; cannot run PbjsVideoBidderPresenceTest.")
             return result
 
-        # Only run on video pages
-        gpt_page_type = (diag.get("pageType") or "unknown").strip().lower()
-        if gpt_page_type != "video":
-            result.state = TestState.SKIPPED
-            result.warnings.append(f"Not a video page (pageType={gpt_page_type}); skipping PbjsVideoBidderPresenceTest.")
-            return result
 
         locale = (diag.get("locale") or "UK").strip().upper()
+        gpt_page_type = diag.get("pageType") or "unknown"
         liveblog = diag.get("liveblog") or ""
         db_page_type = map_pagetype_to_db(gpt_page_type, liveblog)
 
@@ -301,7 +287,8 @@ class PbjsVideoBidderPresenceTest(BaseTest):
         publisher = get_context_publisher(self.config, result.url)
         environment = get_context_environment(self.config, result.url)
 
-        device = "mobile" if self.config.get("mobile", True) else "desktop"
+        from core.device_helpers import device_label
+        device = device_label(self.config)
         geo = locale.lower()
 
         # ✅ only bidders that actually bid on hero_player
@@ -328,17 +315,7 @@ class PbjsVideoBidderPresenceTest(BaseTest):
         )
 
         # Supabase not configured at all -> SKIP
-        supabase_url = (
-            self.config.get("supabase_url")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-            or os.getenv("SUPABASE_URL")
-        )
-        supabase_key = (
-            self.config.get("supabase_anon_key")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-            or os.getenv("SUPABASE_ANON_KEY")
-        )
-        if not supabase_url or not supabase_key:
+        if not is_supabase_configured(self.config):
             result.state = TestState.SKIPPED
             result.warnings.append("Supabase not configured; cannot assert expected VIDEO bidders.")
             return result

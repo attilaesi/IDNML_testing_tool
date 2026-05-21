@@ -1,6 +1,6 @@
-from core.base_test import BaseTest, TestResult, TestState
+from core.base_test import VideoOnlyTest, TestResult, TestState
 
-class PbjsVideoPubcidPresenceTest(BaseTest):
+class PbjsVideoPubcidPresenceTest(VideoOnlyTest):
 
     """
     Validate PubCommonId (pubcid) for VIDEO auctions only (hero_player).
@@ -23,9 +23,6 @@ class PbjsVideoPubcidPresenceTest(BaseTest):
     """
 
     name = "PbjsVideoPubcidPresenceTest"
-
-    async def setup(self, page, url: str) -> bool:
-        return True
 
     async def execute(self, page, url: str) -> TestResult:
         result = TestResult(self.name)
@@ -205,10 +202,5 @@ class PbjsVideoPubcidPresenceTest(BaseTest):
         return result
 
     async def validate(self, result: TestResult) -> TestResult:
-        page_type = ((result.data or {}).get("pageType") or "unknown").strip().lower()
-        if page_type != "video":
-            result.state = TestState.SKIPPED
-            result.warnings.append(f"Not a video page (pageType={page_type}); skipping PbjsPubcidPresenceVideoTest.")
-            return result
         return result
 

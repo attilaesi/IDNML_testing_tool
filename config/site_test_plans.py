@@ -22,6 +22,7 @@ SITE_TEST_PLANS = {
             "gpt_autorefresh_test",
             "gpt_commercial_test",
             "gpt_liveblog_test",
+            "taboola_load_time_test",
         ],
         "exclude_by_page_type": {
             "image": [],
@@ -43,6 +44,7 @@ SITE_TEST_PLANS = {
             "gpt_autorefresh_test",
             "gpt_commercial_test",
             "gpt_liveblog_test",
+            "taboola_load_time_test",
         ],
         "exclude_by_page_type": {
             "index": ["layout_ad_sequence_test"],

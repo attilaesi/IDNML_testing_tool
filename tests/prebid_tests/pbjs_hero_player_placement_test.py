@@ -36,16 +36,16 @@ Pass / Fail / Skipped semantics
 
 from typing import Any, Dict, List
 
-from core.base_test import BaseTest, TestResult, TestState
+from core.base_test import VideoOnlyTest, TestResult, TestState
 
-class PbjsHeroPlayerPlacementTest(BaseTest):
+class PbjsHeroPlayerPlacementTest(VideoOnlyTest):
 
     name = "PbjsHeroPlayerPlacementTest"
 
     HERO_ADUNIT_CODE = "hero_player"
     EXPECTED_PLACEMENT = 1
 
-    async def setup(self, page, url: str) -> bool:
+    async def _video_setup(self, page, url: str) -> bool:
         try:
             await page.wait_for_load_state("domcontentloaded")
         except Exception:
@@ -315,12 +315,6 @@ class PbjsHeroPlayerPlacementTest(BaseTest):
 
     async def validate(self, result: TestResult) -> TestResult:
         diag: Dict[str, Any] = result.data or {}
-
-        page_type = (diag.get("pageType") or "unknown").strip().lower()
-        if page_type != "video":
-            result.state = TestState.SKIPPED
-            result.warnings.append(f"Not a video page (pageType={page_type}); skipping PbjsHeroPlayerPlacementTest.")
-            return result
 
         if not diag.get("hasPbjs"):
             result.state = TestState.SKIPPED

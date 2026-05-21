@@ -2,10 +2,9 @@
 
 from typing import Any, Dict, List
 
-from core.base_test import BaseTest, TestResult, TestState
-from core.data_extractor import DataExtractor
+from core.base_test import VideoOnlyTest, TestResult, TestState
 
-class PbjsPriceFloorsVideoTest(BaseTest):
+class PbjsPriceFloorsVideoTest(VideoOnlyTest):
 
     """
     Validates Prebid price floors configuration for VIDEO auctions.
@@ -30,7 +29,7 @@ class PbjsPriceFloorsVideoTest(BaseTest):
 
     WAIT_AFTER_DOM_MS = 1500
 
-    async def setup(self, page, url: str) -> bool:
+    async def _video_setup(self, page, url: str) -> bool:
         try:
             await page.wait_for_load_state("domcontentloaded")
             try:
@@ -49,10 +48,6 @@ class PbjsPriceFloorsVideoTest(BaseTest):
         result.data = {}
 
         try:
-            # Context / page metrics
-            basic_data = await DataExtractor.extract_basic_data(page, url)
-            result.data.update(basic_data)
-
             diag = await page.evaluate(
                 """
                 () => {
@@ -236,12 +231,6 @@ class PbjsPriceFloorsVideoTest(BaseTest):
 
     async def validate(self, result: TestResult) -> TestResult:
         if result.state == TestState.ERROR:
-            return result
-
-        page_type = ((result.data or {}).get("pageType") or "unknown").strip().lower()
-        if page_type != "video":
-            result.state = TestState.SKIPPED
-            result.warnings.append(f"Not a video page (pageType={page_type}); skipping PbjsPriceFloorsVideoTest.")
             return result
 
         floors = (result.data or {}).get("prebid_floors_video", {}) or {}

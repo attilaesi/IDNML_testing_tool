@@ -34,10 +34,10 @@ PASSED:
 """
 
 from typing import Any, Dict, List, Set
-import os
 import aiohttp
 
 from core.base_test import BaseTest, TestResult, TestState
+from core.supabase_helpers import get_supabase_credentials, is_supabase_configured
 from core.url_context_helpers import (
     map_pagetype_to_db,
     get_context_publisher,
@@ -150,16 +150,7 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         geo: str,
         page_type: str,
     ) -> List[str]:
-        supabase_url = (
-            self.config.get("supabase_url")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-            or os.getenv("SUPABASE_URL")
-        )
-        supabase_key = (
-            self.config.get("supabase_anon_key")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-            or os.getenv("SUPABASE_ANON_KEY")
-        )
+        supabase_url, supabase_key = get_supabase_credentials(self.config)
         table = self.config.get("supabase_bidders_table", "bidder_configs_enriched")
 
         if not supabase_url or not supabase_key:
@@ -227,7 +218,8 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         publisher = get_context_publisher(self.config, result.url)
         environment = get_context_environment(self.config, result.url)
 
-        device = "mobile" if self.config.get("mobile", True) else "desktop"
+        from core.device_helpers import device_label
+        device = device_label(self.config)
         geo = locale.lower()
 
         seen: Set[str] = set(diag.get("biddersFromRequests") or [])
@@ -241,17 +233,7 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         )
 
         # Supabase not configured at all -> SKIP
-        supabase_url = (
-            self.config.get("supabase_url")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
-            or os.getenv("SUPABASE_URL")
-        )
-        supabase_key = (
-            self.config.get("supabase_anon_key")
-            or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
-            or os.getenv("SUPABASE_ANON_KEY")
-        )
-        if not supabase_url or not supabase_key:
+        if not is_supabase_configured(self.config):
             result.state = TestState.SKIPPED
             result.warnings.append("Supabase not configured; cannot assert expected DISPLAY bidders.")
             return result

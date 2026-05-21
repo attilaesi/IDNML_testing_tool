@@ -9,8 +9,8 @@ from urllib.parse import urlparse
 from core.readiness_waiter import ReadinessWaiter
 from core.base_test import BaseTest, TestResult, TestState, _to_snake
 from core.browser_manager import BrowserManager
+from core.device_helpers import device_label, is_mobile_viewport
 from core.cmp_handler import CMPHandler
-from core.data_extractor import DataExtractor  # noqa: F401 (used by tests)
 from core.url_context_helpers import (
     map_pagetype_to_db,
     publisher_from_url,
@@ -74,17 +74,17 @@ class TestFramework:
         """
         Set cookies BEFORE navigation.
 
-        Always:
-          - is_mobile_or_tablet
-
         For UAT / FEAT / DEV only (NOT staging):
           - feature flag cookies from config['preprod_cookies']
 
         Note:
-          - STAGING only needs is_mobile_or_tablet.
+          - is_mobile_or_tablet is set for UAT/FEAT/DEV only (not staging, not live).
+            Live and staging set it themselves from UA/viewport.
+            The environment test verifies it is present and correct on all environments.
         """
-        is_mobile = bool(self.config.get("mobile", True))
+        is_mobile = device_label(self.config) == "mobile"
         preprod_cookies = self.config.get("preprod_cookies", [])
+        light_ad_rules = self.config.get("light_ad_rules", None)  # True / False / None
 
         raw = url or self.config.get("site_url", "")
         parsed = urlparse(raw if raw else "https://www.independent.co.uk")
@@ -102,14 +102,7 @@ class TestFramework:
         is_staging = "staging" in raw_l
         apply_preprod_cookies = is_uat_like and not is_staging
 
-        cookies = [
-            {
-                "name": "is_mobile_or_tablet",
-                "value": "true" if is_mobile else "false",
-                "domain": domain,
-                "path": "/",
-            }
-        ]
+        cookies = []
 
         if apply_preprod_cookies and preprod_cookies:
             for base_cookie in preprod_cookies:
@@ -117,10 +110,28 @@ class TestFramework:
                 c.setdefault("domain", domain)  # apply current host if not set
                 cookies.append(c)
 
+        # Preprod only: set is_mobile_or_tablet from viewport so the site behaves
+        # as if device detection already ran. Live/staging set this themselves.
+        if apply_preprod_cookies:
+            cookies.append({
+                "name": "is_mobile_or_tablet",
+                "value": "true" if is_mobile_viewport(self.config) else "false",
+                "domain": domain,
+                "path": "/",
+            })
+
+        if light_ad_rules is not None:
+            cookies.append({
+                "name": "feat__use_light_ad_rules",
+                "value": "true" if light_ad_rules else "false",
+                "domain": domain,
+                "path": "/",
+            })
+
         try:
             await page.context.add_cookies(cookies)
             print(
-                f"🌍 Context cookies set (mobile={is_mobile}, preprod_cookies={apply_preprod_cookies}): "
+                f"🌍 Context cookies set (device={device_label(self.config)}, preprod_cookies={apply_preprod_cookies}): "
                 f"{[c['name'] + '=' + c['value'] for c in cookies]}"
             )
         except Exception as e:
@@ -184,7 +195,7 @@ class TestFramework:
         }
         """
 
-        timeout = float(self.config.get("page_type_timeout", 3.0))
+        timeout = max(float(self.config.get("page_type_timeout", 3.0)), 0.25)
         interval = 0.25
         elapsed = 0.0
 
@@ -528,6 +539,7 @@ class TestFramework:
         url_idx: int,
         total_urls: int,
         handle_cmp: bool,
+        explicit_tests: bool = False,
     ) -> List[TestResult]:
         """
         Navigate to URL, prepare environment, run all tests, return results.
@@ -543,7 +555,8 @@ class TestFramework:
         await self._set_context_cookies(page, auth_url)
 
         # Navigate & wait for DOM
-        await page.goto(auth_url, wait_until="domcontentloaded")
+        nav_timeout = int(self.config.get("timeout", 30000))
+        await page.goto(auth_url, wait_until="domcontentloaded", timeout=nav_timeout)
 
         # CMP only once per session / first URL (per mode)
         if handle_cmp:
@@ -570,6 +583,29 @@ class TestFramework:
             }
         """)
 
+        def _skipped_results(reason: str) -> List[TestResult]:
+            results = []
+            for cls in test_classes:
+                r = TestResult(_to_snake(cls.__name__))
+                r.url = url
+                r.state = TestState.SKIPPED
+                r.warnings.append(reason)
+                results.append(r)
+            return results
+
+        # Skip bulletin pages — ad rules not defined yet.
+        if "bulletin" in (url or "").lower():
+            print(f"[{url_idx}/{total_urls}] ⏭️  Skipping bulletin page: {url}")
+            return _skipped_results("Bulletin page — ad rules not defined; skipping all tests.")
+
+        # Skip premium pages — not monetised, no ads to test.
+        is_premium = await page.evaluate(
+            "() => !!document.querySelector('path[fill=\"#337E81\"]')"
+        )
+        if is_premium:
+            print(f"[{url_idx}/{total_urls}] ⏭️  Skipping premium page: {url}")
+            return _skipped_results("Premium page — not monetised; skipping all tests.")
+
         # Detect page type from GPT key-values (with small polling window)
         page_type_norm = await self._detect_page_type(page)
         print(f"[{url_idx}/{total_urls}] 🧩 Detected page type: {page_type_norm}")
@@ -582,7 +618,7 @@ class TestFramework:
         liveblog = await self._detect_liveblog(page)
         db_page_type = self._map_pagetype_to_db(page_type_norm, liveblog)
         env = self._env_from_url(auth_url or url)
-        device = "mobile" if self.config.get("mobile", True) else "desktop"
+        device = device_label(self.config)
         geo = (locale or "UK").strip().lower()
         publisher = self._publisher_from_url(auth_url or url)
         counts = await self._get_event_store_counts(page)
@@ -613,18 +649,25 @@ class TestFramework:
 
         # 🔸 Apply site test plan (inherit-all, then exclude by page type)
         # IMPORTANT: site plans are keyed by publisher, not by active_site variants
+        # When tests are explicitly named (--test / --tests), bypass plan exclusions entirely.
         site_plan = SITE_TEST_PLANS.get(publisher, {})
 
         def _class_name(cls: Type[BaseTest]) -> str:
             return _to_snake(cls.__name__)
 
-        if site_plan and site_plan.get("exclude") is not None:
+        # ENVIRONMENT tests are always exempt from site-plan exclusions
+        env_test_names = set(
+            _class_name(cls)
+            for cls in self.get_tests_by_category("ENVIRONMENT")
+        )
+
+        if not explicit_tests and site_plan and site_plan.get("exclude") is not None:
             excluded_site = set(site_plan.get("exclude", []))
             exclude_map = site_plan.get("exclude_by_page_type", {}) or {}
             excluded_pt = set(exclude_map.get(page_type_norm, []))
 
-            # Final disallowed set for this URL
-            disallowed = excluded_site | excluded_pt
+            # Final disallowed set for this URL (env tests are never disallowed)
+            disallowed = (excluded_site | excluded_pt) - env_test_names
 
             # Only instantiate / run tests that are allowed for this URL
             run_classes = [cls for cls in test_classes if _class_name(cls) not in disallowed]
@@ -688,11 +731,7 @@ class TestFramework:
             test_name = _class_name(cls)
             test = cls(self.config)
 
-            # Expose locale on the test instance so tests can read self.locale
-            try:
-                setattr(test, "locale", locale)
-            except Exception:
-                pass
+            test.locale = locale
 
             prefix = f"[{url_idx}/{total_urls}]   {test_name}: "
             _progress_start(prefix)
@@ -759,6 +798,7 @@ class TestFramework:
         results: List[TestResult] = []
 
         # Which tests to run? (we build the full pool of *classes*; site plan is applied per URL)
+        explicit_tests = bool(test_names)  # True when caller named specific tests
         if test_names:
             test_classes: List[Type[BaseTest]] = [self.tests[name] for name in test_names if name in self.tests]
         elif category:
@@ -766,19 +806,27 @@ class TestFramework:
         else:
             test_classes = list(self.tests.values())
 
+        # Always prepend ENVIRONMENT tests so they run first.
+        # They are exempt from site-plan exclusions (handled in _run_tests_for_url).
+        env_classes = self.get_tests_by_category("ENVIRONMENT")
+        env_class_set = set(id(cls) for cls in env_classes)
+        # Remove env tests from their current position (if present), then prepend
+        non_env = [cls for cls in test_classes if id(cls) not in env_class_set]
+        test_classes = env_classes + non_env
+
         if not test_classes:
             print("No tests found to run")
             return results
 
         # Start browser / context
         await self.browser_manager.start()
-        print(f"🛫 Browser launched (mobile = {self.config.get('mobile', True)})")
+        print(f"🛫 Browser launched (device = {device_label(self.config)}, viewport = {self.config.get('viewport')})")
 
         # Get URLs
         selected_urls = await self._get_selected_urls()
         self.selected_urls = list(selected_urls)  # preserve crawl order for matrix
         total_urls = len(selected_urls)
-        print(f"▶️  Starting crawl: {total_urls} URLs (mobile={self.config.get('mobile', True)})")
+        print(f"▶️  Starting crawl: {total_urls} URLs (device={device_label(self.config)})")
 
         if total_urls == 0:
             print("⚠️ No URLs found to test (config['urls'] is empty).")
@@ -822,6 +870,7 @@ class TestFramework:
                     url_idx=url_idx,
                     total_urls=total_urls,
                     handle_cmp=(url_idx == 1 and warmup_pages == 0),
+                    explicit_tests=explicit_tests,
                 )
                 results.extend(url_results)
 
@@ -841,12 +890,19 @@ class TestFramework:
                             url_idx=url_idx,
                             total_urls=total_urls,
                             handle_cmp=(url_idx == 1 and warmup_pages == 0),
+                            explicit_tests=explicit_tests,
                         )
+                    except Exception as e:
+                        print(f"[{url_idx}/{total_urls}] ⚠️  Worker error for {url}: {e}")
+                        return []
                     finally:
-                        await page.close()
+                        try:
+                            await page.close()
+                        except Exception:
+                            pass
 
             tasks = [asyncio.create_task(run_for_url(idx, url)) for idx, url in enumerate(selected_urls, start=1)]
-            url_results_lists = await asyncio.gather(*tasks)
+            url_results_lists = await asyncio.gather(*tasks, return_exceptions=False)
             for url_results in url_results_lists:
                 results.extend(url_results)
 

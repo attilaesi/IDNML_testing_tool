@@ -1,6 +1,7 @@
 # config/base_config.py
 
 from config.site_urls import SITE_PROFILES
+from config.device_config import ACTIVE_DEVICE
 
 
 class TestConfig:
@@ -16,11 +17,17 @@ class TestConfig:
         # Which site profile to use:
         #   "independent", "independent_uat", "independent_staging",
         #   "standard", "standard_uat", "standard_staging"
-        self.active_site = "independent"
-        # self.active_site = "independent_uat"
+        # self.active_site = "independent"
+        self.active_site = "independent_uat"
         # self.active_site = "independent_staging"
         # self.active_site = "standard"
         # self.active_site = "standard_dev_master"
+
+        # Force the lighter ad layout rule set.
+        # When True, sets cookie feat__use_light_ad_rules=true on every page load.
+        # When False, sets feat__use_light_ad_rules=false.
+        # Set to None to leave the cookie unset (page uses its own default).
+        self.light_ad_rules = False
 
         # Independent feature branch override.
         # When set, uses the "independent" URL list but replaces the live domain
@@ -31,15 +38,13 @@ class TestConfig:
         self.indy_feat_branch = None
 
         # Browser-level settings
+        # Device profile drives viewport, user agent, touch, and is_mobile.
+        # Change ACTIVE_DEVICE in config/device_config.py to switch devices.
         self.browser_config = {
-            "headless": False,
-            # For now this is the single switch; we’ll refactor to device_mode later
-            "mobile": True,
+            "headless": True,
             # Playwright default timeout (ms)
             "timeout": 30000,
-            # Viewport – keep in sync with mobile flag for now
-            "viewport": {"width": 390, "height": 844},
-            # "viewport": {"width": 1366, "height": 768},
+            "device_name": ACTIVE_DEVICE,
         }
 
         # Framework / test behaviour
@@ -48,8 +53,8 @@ class TestConfig:
             "max_pages": 10,
 
             # Run pages sequentially or in parallel
-            "parallel_tests": False,
-            "concurrency": 4,  # only used when parallel_tests=True
+            "parallel_tests": True,
+            "concurrency": 2,  # only used when parallel_tests=True
 
             # Debug / robustness settings
             "debug_screenshots": False,    # CMP / failure screenshots
@@ -59,7 +64,13 @@ class TestConfig:
             "warmup_pages": 3,             # number of pages to run before testing start
 
             # 🔸 Global trace switch for extra console logging in tests
-            "trace": True,
+            "trace": False,
+        }
+
+        # Taboola settings
+        self.taboola_config = {
+            "taboola_loader_url": "https://cdn.taboola.com/libtrc/eslmedia-theindependent/loader.js",
+            "taboola_wait_timeout_ms": 15000,
         }
 
         # Output configuration
@@ -86,9 +97,11 @@ class TestConfig:
         config.update(self.browser_config)
         config.update(self.test_config)
         config.update(self.output_config)
+        config.update(self.taboola_config)
 
         # Attach cookies (application is decided in framework_manager based on URL)
         config["preprod_cookies"] = self.preprod_cookies
+        config["light_ad_rules"] = self.light_ad_rules
 
         # Attach site profile & URLs
         site_key = str(self.active_site).lower()

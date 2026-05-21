@@ -23,23 +23,13 @@ class BrowserManager:
 
         self.browser = await browser_type.launch(headless=headless, slow_mo=slow_mo)
 
-        is_mobile = bool(self.config.get("mobile", True))
+        # Resolve device profile — sets viewport, UA, touch, is_mobile, etc.
+        device_name = self.config.get("device_name")
+        device_profile = self.playwright.devices.get(device_name, {}) if device_name else {}
 
-        # Default viewport & UA
-        if is_mobile:
-            viewport = {"width": 390, "height": 844}  # iPhone-ish
-            user_agent = (
-                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 "
-                "Mobile/15E148 Safari/604.1"
-            )
-        else:
-            viewport = {"width": 1365, "height": 768}
-            user_agent = (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
+        # Store resolved viewport back into config so device_helpers can read it.
+        if "viewport" in device_profile:
+            self.config["viewport"] = device_profile["viewport"]
 
         # ---------------------------------------------------------------------
         # IMPORTANT: Basic auth for pre-prod MUST be done via Playwright
@@ -58,10 +48,7 @@ class BrowserManager:
             or self.config.get("active_site", "") == "independent_feat"
         )
 
-        context_kwargs = {
-            "viewport": viewport,
-            "user_agent": user_agent,
-        }
+        context_kwargs = {**device_profile}
 
         if is_preprod:
             # Allow override via config, fallback to demo/review

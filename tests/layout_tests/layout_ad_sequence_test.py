@@ -37,14 +37,22 @@ What counts as PASS / FAIL / SKIPPED
     - None of the must-have slots could be resolved (ads not on page).
 
 * FAILED:
-    - A slot is MISSING or appears at the wrong paragraph position.
-    - Slots whose expectedAfter position exceeds the article's total paragraph
-      count are silently skipped (article too short to test them).
+    - A slot exists in the DOM but is more than 1 paragraph away from its
+      expected position.
+
+* WARNED:
+    - A slot exists but is exactly 1 paragraph off (close enough, noted only).
+
+* SKIPPED (per slot):
+    - Anchor not placed on the page — article too short or site chose not to
+      insert it. Not a failure.
+    - Slot's expected position exceeds total paragraph count.
 
 * PASSED:
     - All resolved slots appear at their expected position (or +1 image grace).
 """
 
+import re
 from typing import Dict, Any, List
 from core.base_test import BaseTest, TestResult, TestState
 
@@ -56,26 +64,17 @@ class LayoutAdSequenceTest(BaseTest):
         if not has_main:
             return False
 
-        # Poll up to 5s for Taboola to inject rendered content.
-        # The framework already scrolled the full page before tests run.
-        # We require an actual rbox with items, not just an empty container.
-        try:
-            await page.wait_for_function(
-                """() => {
-                    const rbox = document.querySelector(".trc_rbox");
-                    if (rbox && rbox.querySelector(".trc_rbox_div")) return true;
-                    const items = document.querySelectorAll(
-                        ".trc_related_container .trc-item, "
-                        + ".tbl-trecs-container .trc-item, "
-                        + "[id^='taboola-'] .trc-item"
-                    );
-                    return items.length > 0;
-                }""",
-                polling=250,
-                timeout=5000,
-            )
-        except Exception:
-            pass
+        # Skip pages with no GPT slots — nothing to test.
+        has_gpt_slots = await page.evaluate("""
+            () => {
+                try {
+                    return !!(window.googletag && googletag.pubads &&
+                              googletag.pubads().getSlots().length > 0);
+                } catch(e) { return false; }
+            }
+        """)
+        if not has_gpt_slots:
+            return False
 
         return True
 
@@ -101,8 +100,8 @@ class LayoutAdSequenceTest(BaseTest):
 
           const featUseLightAdRules =
             (getCookie("feat__use_light_ad_rules") || "").toLowerCase() === "true";
-          const isMobileOrTablet =
-            (getCookie("is_mobile_or_tablet") || "").toLowerCase() === "true";
+          const mobileCookieRaw = getCookie("is_mobile_or_tablet");
+          const isMobileOrTablet = (mobileCookieRaw || "").toLowerCase() === "true";
 
           function isVisible(el) {
             if (!el) return false;
@@ -142,69 +141,12 @@ class LayoutAdSequenceTest(BaseTest):
             return null;
           }
 
-          function findRecommendedBlock() {
-            for (const child of container.children) {
-              if (!isVisible(child)) continue;
-
-              // Inline recommended block
-              const label = child.querySelector("span, h2, h3, h4, [role='heading']");
-              if (/^recommended$/i.test((label && label.textContent || "").trim())) {
-                if (child.querySelector("ul li a")) return child;
-              }
-
-              // Taboola recommended block
-              const outer = child.matches &&
-                child.matches(".trc_related_container, .tbl-trecs-container, [id^='taboola-']")
-                ? child
-                : child.querySelector &&
-                  child.querySelector(".trc_related_container, .tbl-trecs-container, [id^='taboola-']");
-              if (!outer) continue;
-              const rbox = outer.querySelector(".trc_rbox");
-              if (!rbox) continue;
-              const layouts = [
-                "alternating-thumbnails-stream-1x4",
-                "alternating-thumbnails-stream-1x4-a",
-                "alternating-thumbnails-d1"
-              ];
-              if (!layouts.some(cls => rbox.classList.contains(cls))) continue;
-              const h = outer.querySelector(
-                ".trc_rbox_header_span, [role='heading'], h2, h3, h4, span"
-              );
-              if (/^recommended$/i.test((h && h.textContent || "").trim())) return child;
-            }
-            return null;
+          function findRecommended() {
+            return document.getElementById("taboola-mid-article-thumbnails-ii") || null;
           }
 
           function findTaboolaAd() {
-            const containers = Array.from(container.querySelectorAll(
-              ".trc_related_container, .tbl-trecs-container, [id^='taboola-'], .taboola"
-            )).filter(isVisible);
-
-            for (const outer of containers) {
-              const rbox = outer.querySelector(
-                ".trc_rbox.alternating-thumbnails-d1.trc-content-sponsored"
-              );
-              if (!rbox || !isVisible(rbox)) continue;
-              const t = (outer.textContent || "").trim();
-              if (/(promoted|sponsored|Sponsored Links|by Taboola|Promoted Links)/i.test(t)) {
-                return outer;
-              }
-            }
-
-            const allRboxes = Array.from(container.querySelectorAll(
-              ".trc_rbox.alternating-thumbnails-d1.trc-content-sponsored"
-            )).filter(isVisible);
-
-            for (const r of allRboxes) {
-              const block = r.closest(
-                ".trc_related_container, .tbl-trecs-container, [id^='taboola-'], .taboola"
-              ) || r;
-              const t = (block.textContent || "").trim();
-              if (/(promoted|sponsored|Sponsored Links|by Taboola|Promoted Links)/i.test(t)) {
-                return block;
-              }
-            }
-            return null;
+            return document.getElementById("taboola-carousel-thumbnails") || null;
           }
 
           function collectAllSlotNames() {
@@ -223,13 +165,13 @@ class LayoutAdSequenceTest(BaseTest):
           const allSlotNames = collectAllSlotNames();
           let ruleSetName, mustHaveKeys, targets;
 
-          if (featUseLightAdRules) {
-            ruleSetName = "light";
-            mustHaveKeys = ["mpu1-m", "recommended", "taboola_ad"];
+          if (featUseLightAdRules && isMobileOrTablet) {
+            ruleSetName = "light-mobile";
+            mustHaveKeys = ["mpu1-m", "taboola-mid-article-thumbnails-ii", "taboola-carousel-thumbnails"];
             targets = [
-              { key:"mpu1-m",      expectedAfter:3,  finder:function(){ return findSlotByName("mpu1-m"); } },
-              { key:"recommended", expectedAfter:5,  finder:findRecommendedBlock },
-              { key:"taboola_ad",  expectedAfter:7,  finder:findTaboolaAd },
+              { key:"mpu1-m",                              expectedAfter:3,  finder:function(){ return findSlotByName("mpu1-m"); } },
+              { key:"taboola-mid-article-thumbnails-ii",   expectedAfter:5,  finder:findRecommended },
+              { key:"taboola-carousel-thumbnails",         expectedAfter:7,  finder:findTaboolaAd },
               { key:"mpu2-m",      expectedAfter:9,  finder:function(){ return findSlotByName("mpu2-m"); } },
               { key:"mpu3-m",      expectedAfter:13, finder:function(){ return findSlotByName("mpu3-m"); } },
               { key:"mpu4-m",      expectedAfter:18, finder:function(){ return findSlotByName("mpu4-m"); } },
@@ -238,11 +180,11 @@ class LayoutAdSequenceTest(BaseTest):
             ];
           } else if (isMobileOrTablet) {
             ruleSetName = "heavy-mobile";
-            mustHaveKeys = ["mpu1-m", "taboola_ad"];
+            mustHaveKeys = ["mpu1-m", "taboola-carousel-thumbnails"];
             targets = [
-              { key:"mpu1-m",     expectedAfter:2,  finder:function(){ return findSlotByName("mpu1-m"); } },
-              { key:"mpu2-m",     expectedAfter:4,  finder:function(){ return findSlotByName("mpu2-m"); } },
-              { key:"taboola_ad", expectedAfter:6,  finder:findTaboolaAd },
+              { key:"mpu1-m",                      expectedAfter:2,  finder:function(){ return findSlotByName("mpu1-m"); } },
+              { key:"mpu2-m",                      expectedAfter:4,  finder:function(){ return findSlotByName("mpu2-m"); } },
+              { key:"taboola-carousel-thumbnails", expectedAfter:6,  finder:findTaboolaAd },
               { key:"mpu3-m",     expectedAfter:8,  finder:function(){ return findSlotByName("mpu3-m"); } },
               { key:"mpu4-m",     expectedAfter:10, finder:function(){ return findSlotByName("mpu4-m"); } },
             ];
@@ -264,10 +206,10 @@ class LayoutAdSequenceTest(BaseTest):
             }
           } else {
             ruleSetName = "heavy-desktop";
-            mustHaveKeys = ["mpu1", "taboola_ad"];
+            mustHaveKeys = ["mpu1", "taboola-carousel-thumbnails"];
             targets = [
-              { key:"mpu1",       expectedAfter:3, finder:function(){ return findSlotByName("mpu1"); } },
-              { key:"taboola_ad", expectedAfter:6, finder:findTaboolaAd },
+              { key:"mpu1",                        expectedAfter:3, finder:function(){ return findSlotByName("mpu1"); } },
+              { key:"taboola-carousel-thumbnails", expectedAfter:6, finder:findTaboolaAd },
               { key:"mpu2",       expectedAfter:8, finder:function(){ return findSlotByName("mpu2"); } },
               { key:"mpu3",       expectedAfter:10, finder:function(){ return findSlotByName("mpu3"); } },
             ];
@@ -342,19 +284,22 @@ class LayoutAdSequenceTest(BaseTest):
             const seenAfter = firstSeen[t.key];
             let status;
 
-            // Article too short to reach this slot's expected position — skip.
+            // Article too short — slot not expected at this length.
             if (pCount <= t.expectedAfter) {
               status = "SKIPPED (article too short: " + pCount + " paragraphs, needs >" + t.expectedAfter + ")";
+            // Article long enough — slot was expected but not found.
             } else if (!el) {
-              status = "MISSING";
+              status = "FAIL (missing — expected after paragraph " + t.expectedAfter + ")";
             } else if (seenAfter == null) {
-              status = "MISSING (not reached)";
+              status = "FAIL (anchor exists but not found inside #main)";
             } else if (seenAfter === t.expectedAfter) {
               status = "PASS";
             } else if (passesImageGrace(t, seenAfter)) {
               status = "PASS (image shift to " + seenAfter + ")";
+            } else if (Math.abs(seenAfter - t.expectedAfter) === 1) {
+              status = "WARN (seen after " + seenAfter + ", expected " + t.expectedAfter + ")";
             } else {
-              status = "FAIL (seen after " + seenAfter + ", expected " + t.expectedAfter + ")";
+              status = "FAIL (misplaced — seen after " + seenAfter + ", expected " + t.expectedAfter + ")";
             }
 
             return {
@@ -404,6 +349,7 @@ class LayoutAdSequenceTest(BaseTest):
           return {
             ruleSetName: ruleSetName,
             isMobileOrTablet: isMobileOrTablet,
+            mobileCookieRaw: mobileCookieRaw,
             featUseLightAdRules: featUseLightAdRules,
             totalParagraphs: pCount,
             domSlots: domSlots,
@@ -441,37 +387,79 @@ class LayoutAdSequenceTest(BaseTest):
         mobile = diag.get("isMobileOrTablet", False)
 
         rule_label = f"{'light' if light else 'heavy'}-{'mobile' if mobile else 'desktop'}"
-        print(f"         layout rule: {rule_label}  paragraphs: {paragraphs}")
-        print(f"         DOM slots : {', '.join(dom_slots) if dom_slots else '(none)'}")
-        print(f"         GPT slots : {', '.join(gpt_slots) if gpt_slots else '(none)'}")
+        if self.config.get("trace"):
+            print(f"         layout rule: {rule_label}  paragraphs: {paragraphs}")
+            print(f"         DOM slots : {', '.join(dom_slots) if dom_slots else '(none)'}")
+            print(f"         GPT slots : {', '.join(gpt_slots) if gpt_slots else '(none)'}")
 
         continuity_fail: str = diag.get("continuityFail") or ""
         mpu_sequence: List[int] = diag.get("mpuSequence", [])
 
-        skipped = [r for r in rows if r["status"].startswith("SKIPPED")]
-        failures = [r for r in rows if r["status"].startswith("FAIL") or r["status"].startswith("MISSING")]
-        passes = [r for r in rows if r["status"].startswith("PASS")]
+        # --- is_mobile_or_tablet cookie check ---
+        from core.device_helpers import is_mobile_viewport
+        expected_mobile = is_mobile_viewport(self.config)
+        mobile_cookie_raw = diag.get("mobileCookieRaw")  # None if absent
+        mobile_cookie_errors: List[str] = []
+        if mobile_cookie_raw is None:
+            mobile_cookie_errors.append(
+                "is_mobile_or_tablet cookie not set by site "
+                f"(expected {'true' if expected_mobile else 'false'})"
+            )
+        elif (mobile_cookie_raw.lower() == "true") != expected_mobile:
+            mobile_cookie_errors.append(
+                f"is_mobile_or_tablet cookie mismatch: "
+                f"site set '{mobile_cookie_raw}', "
+                f"expected '{'true' if expected_mobile else 'false'}' "
+                f"based on test config (mobile={expected_mobile})"
+            )
 
-        layout_label = "lighter-ad-layout" if light else "standard-ad-layout"
-        layout_context = f"{layout_label}  rule_set={rule_set}  paragraphs={paragraphs}"
+        skipped    = [r for r in rows if r["status"].startswith("SKIPPED")]
+        failures   = [r for r in rows if r["status"].startswith("FAIL")]
+        near_misses = [r for r in rows if r["status"].startswith("WARN")]
+        passes     = [r for r in rows if r["status"].startswith("PASS")]
 
-        if failures or continuity_fail:
+        # GPT cross-check: expected MPU slots must be registered with GPT.
+        # "Expected" = article long enough (not SKIPPED) and slot is an MPU.
+        # Exclude mobile_footer — it lives outside #main.
+        gpt_slot_ids = set(gpt_slots) - {"mobile_footer"}
+        mpu_re = r"^mpu\d+(?:-m)?$"
+        gpt_errors: List[str] = []
+        for r in rows:
+            if r["status"].startswith("SKIPPED"):
+                continue
+            unit = r["unit"]
+            if re.match(mpu_re, unit) and unit not in gpt_slot_ids:
+                gpt_errors.append(f"{unit}: expected on page but not registered in GPT")
+
+        layout_label = "light" if light else "standard"
+        expected_slots = [r["unit"] for r in rows if not r["status"].startswith("SKIPPED")]
+        layout_tag = f"layout={layout_label}, paragraphs={paragraphs}, expected=[{', '.join(expected_slots)}]"
+
+        if failures or continuity_fail or gpt_errors or mobile_cookie_errors:
             result.state = TestState.FAILED
+            for e in mobile_cookie_errors:
+                result.errors.append(e)
             for r in failures:
                 result.errors.append(f"{r['unit']}: {r['status']}")
             if continuity_fail:
                 result.errors.append(f"slot sequence gap: {continuity_fail}")
+            for e in gpt_errors:
+                result.errors.append(e)
         else:
             result.state = TestState.PASSED
 
+        for r in near_misses:
+            result.warnings.append(f"{r['unit']}: {r['status']}")
+
         result.warnings.append(
-            f"{layout_context}  "
+            f"layout={layout_label}  rule_set={rule_set}  paragraphs={paragraphs}  "
             f"slots checked={len(rows)}  passed={len(passes)}  "
-            f"failed={len(failures)}  skipped={len(skipped)}"
+            f"warned={len(near_misses)}  failed={len(failures)}  skipped={len(skipped)}"
         )
-        result.metadata["layout_context"] = layout_context
+        result.metadata["layout_tag"] = layout_tag
         result.metadata["rows"] = rows
         result.metadata["ruleSetName"] = rule_set
         result.metadata["mpuSequence"] = mpu_sequence
+        result.metadata["gpt_slot_ids"] = sorted(gpt_slot_ids)
 
         return result

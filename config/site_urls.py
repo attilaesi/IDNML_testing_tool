@@ -49,6 +49,7 @@ SITE_PROFILES = {
     "standard": {
         "site_url": "https://www.standard.co.uk",
         "urls": [
+            "https://www.standard.co.uk/news/london/kingston-ancient-market-revival-b1276991.html",
             "https://www.standard.co.uk/showbiz/holly-ramsay-adam-peaty-feud-mother-gordon-b1257683.html",
             "https://www.standard.co.uk/news/london/crazy-golf-wall-boy-dies-b1257766.html",
             "https://www.standard.co.uk/lifestyle/celebrity/brad-pitt-ines-de-ramon-relationship-b1257724.html",

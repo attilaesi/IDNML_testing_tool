@@ -34,6 +34,7 @@ class BaseTest(ABC):
         self.name = _to_snake(self.__class__.__name__)
         self.description = self.__doc__ or "No description provided"
         self.category = self._get_category()
+        self.locale: str = "UK"  # Set by framework_manager before each test runs
         
     @abstractmethod
     async def setup(self, page, url: str) -> bool:
@@ -67,6 +68,22 @@ class BaseTest(ABC):
             return 'Performance'
         return 'Unknown'
     
+    async def _is_video_page(self, page) -> bool:
+        """Return True if GPT pageType targeting is 'video'."""
+        try:
+            val = await page.evaluate("""
+                () => {
+                    try {
+                        const pt = window.googletag && googletag.pubads &&
+                                   googletag.pubads().getTargeting("pageType");
+                        return pt && pt[0] ? String(pt[0]).toLowerCase() : "";
+                    } catch(e) { return ""; }
+                }
+            """)
+            return (val or "").strip() == "video"
+        except Exception:
+            return False
+
     async def run(self, page, url: str) -> TestResult:
         """Main test runner with state management"""
         result = TestResult(self.name)
@@ -96,5 +113,22 @@ class BaseTest(ABC):
         
         finally:
             result.execution_time = asyncio.get_running_loop().time() - start_time
-            
+
         return result
+
+
+class VideoOnlyTest(BaseTest):
+    """
+    Base class for tests that only run on video pages.
+    Subclasses do NOT need to check pageType themselves — setup() handles it.
+    Override _video_setup() for any additional setup after the page-type check.
+    """
+
+    async def setup(self, page, url: str) -> bool:
+        if not await self._is_video_page(page):
+            return False
+        return await self._video_setup(page, url)
+
+    async def _video_setup(self, page, url: str) -> bool:
+        """Override for additional setup. Called only on video pages."""
+        return True
