@@ -11,6 +11,24 @@
 
 ACTIVE_DEVICE = "iPhone 15 Pro Max"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DEVICE_SUITE — canonical four-device set for multi-device test runs.
+#
+# Choices reflect today's UK market split:
+#   desktop       — standard editorial newsroom benchmark (Chrome 1280×720)
+#   mobile_ios    — iPhone 15 Pro; ~27% UK mobile share, modern mid/high iPhone
+#   mobile_android— Pixel 7; modern Android flagship, most common GA profile
+#   tablet        — iPad Pro 11; dominant tablet form factor, distinct breakpoint
+#
+# Used by tasks/run_multi_device.py. Not used by run_tests.py (ACTIVE_DEVICE).
+# ─────────────────────────────────────────────────────────────────────────────
+DEVICE_SUITE = {
+    "desktop":        "Desktop Chrome",
+    "mobile_ios":     "iPhone 15 Pro",
+    "mobile_android": "Pixel 7",
+    "tablet":         "iPad Pro 11",
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DESKTOP

@@ -22,6 +22,7 @@ class TestResult:
         self.test_name = test_name
         self.state = TestState.PENDING
         self.url = ""
+        self.device = ""   # set by framework when running multi-device
         self.data = {}
         self.errors = []
         self.warnings = []

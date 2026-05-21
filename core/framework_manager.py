@@ -739,7 +739,8 @@ class TestFramework:
             try:
                 result = await test.run(page, url)
 
-                # Attach page_type, locale and GLOBAL CONTEXT TRACE into metadata
+                # Attach page_type, locale, device and GLOBAL CONTEXT TRACE into metadata
+                result.device = device_label(self.config)
                 try:
                     if hasattr(result, "metadata"):
                         if result.metadata is None:
@@ -767,6 +768,7 @@ class TestFramework:
             except Exception as e:
                 err_result = TestResult(test_name)
                 err_result.url = url
+                err_result.device = device_label(self.config)
                 err_result.state = TestState.ERROR
                 err_result.errors.append(str(e))
                 try:
@@ -792,7 +794,10 @@ class TestFramework:
     # ------------- Main runner -------------
 
     async def run_tests(
-        self, test_names: Optional[List[str]] = None, category: str = None
+        self,
+        test_names: Optional[List[str]] = None,
+        category: str = None,
+        write_csv: bool = True,
     ) -> List[TestResult]:
         """Run specified tests, using either single-page mode or parallel mode."""
         results: List[TestResult] = []
@@ -910,15 +915,93 @@ class TestFramework:
         await self.browser_manager.close()
         self._warm_page = None
 
-        # Write CSV output (still test × URL at this stage)
-        await self.csv_writer.write_main(results)
+        if write_csv:
+            await self.csv_writer.write_main(results)
+            await self.csv_writer.write_pagetype_summary(results)
 
-        # Write additional page-type summary CSV
-        await self.csv_writer.write_pagetype_summary(results)
-
-        # Print matrix at the end (matches your desired format)
-        # Default ON; can be disabled via config["print_matrix_summary"]=False
         if bool(self.config.get("print_matrix_summary", True)):
             self._print_matrix_summary(results, self.selected_urls)
 
         return results
+
+    # ------------- Cross-device comparison matrix -------------
+
+    @staticmethod
+    def print_device_comparison_matrix(
+        all_results: List[TestResult],
+        device_keys: List[str],
+    ) -> None:
+        """
+        Print a compact cross-device summary.
+
+        Rows  = test names (sorted)
+        Cols  = device keys (e.g. desktop, mobile_ios, mobile_android, tablet)
+        Cell  = aggregated result across all URLs for that test × device:
+                  PASS          — every URL passed
+                  FAIL (N/M)    — N out of M URLs failed or errored
+                  SKIP          — every URL skipped
+                  MIXED         — mix of pass and skip (no failures)
+                  -             — no results recorded
+        """
+        import shutil
+        from core.ansi import colour_cell
+
+        # Aggregate: (test_name, device) → list of states
+        from collections import defaultdict
+        buckets: Dict[tuple, List] = defaultdict(list)
+        for r in all_results:
+            key = (getattr(r, "test_name", ""), getattr(r, "device", ""))
+            buckets[key].append(r.state)
+
+        test_names = sorted({r.test_name for r in all_results if getattr(r, "test_name", None)})
+
+        def _agg_cell(states: List) -> str:
+            if not states:
+                return "-"
+            total = len(states)
+            n_pass = sum(1 for s in states if s == TestState.PASSED)
+            n_skip = sum(1 for s in states if s == TestState.SKIPPED)
+            n_fail = sum(1 for s in states if s in (TestState.FAILED, TestState.ERROR))
+            if n_fail:
+                return f"FAIL ({n_fail}/{total})" if n_fail < total else "FAIL"
+            if n_skip == total:
+                return "SKIP"
+            if n_pass == total:
+                return "PASS"
+            return "MIXED"
+
+        max_test = 36
+        max_cell = max(18, max(len(d) for d in device_keys) + 2)
+
+        def clip(s: str, n: int) -> str:
+            return s if len(s) <= n else s[:n - 1] + "…"
+
+        widths = [max_test] + [max(max_cell, len(d)) for d in device_keys]
+
+        def sep(c: str = "-") -> str:
+            return "".join("+" + (c * (w + 2)) for w in widths) + "+"
+
+        def fmt_row(cols, is_header: bool = False) -> str:
+            out = []
+            for i, c in enumerate(cols):
+                clipped = clip(str(c), widths[i])
+                if not is_header and i > 0:
+                    pad = " " * max(0, widths[i] - len(clipped))
+                    out.append(colour_cell(clipped) + pad)
+                else:
+                    out.append(clipped.ljust(widths[i]))
+            return "| " + " | ".join(out) + " |"
+
+        title = "📊 CROSS-DEVICE SUMMARY (rows=tests, cols=devices)"
+        border = "=" * max(len(sep()), len(title))
+
+        print("\n" + border)
+        print(title)
+        print(border)
+        print(sep())
+        print(fmt_row(["Test"] + device_keys, is_header=True))
+        print(sep("="))
+        for t in test_names:
+            row = [t] + [_agg_cell(buckets.get((t, d), [])) for d in device_keys]
+            print(fmt_row(row))
+            print(sep())

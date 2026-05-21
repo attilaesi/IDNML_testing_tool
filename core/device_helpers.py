@@ -1,18 +1,21 @@
 # core/device_helpers.py
 #
 # Device type detection from viewport dimensions.
-# Portrait orientation (width < height) = mobile/tablet.
-# Landscape orientation (width >= height) = desktop.
 #
-# This works for any viewport size without magic breakpoints:
-#   390x844  (iPhone)        → mobile
-#   1366x768 (laptop)        → desktop
-#   768x1024 (iPad portrait) → mobile
-#   1024x768 (iPad landscape)→ desktop
+#   390x659  (iPhone 15 Pro)   → mobile
+#   412x839  (Pixel 7)         → mobile
+#   834x1194 (iPad Pro 11)     → tablet   (portrait, width >= 768)
+#   768x1024 (iPad mini)       → tablet   (portrait, width >= 768)
+#   1024x768 (iPad landscape)  → desktop  (landscape)
+#   1280x720 (Desktop Chrome)  → desktop
+
+
+# Minimum portrait width to classify as tablet rather than phone.
+_TABLET_MIN_WIDTH = 768
 
 
 def is_mobile_viewport(config: dict) -> bool:
-    """Return True if the configured viewport is portrait (width < height)."""
+    """Return True if the viewport is in portrait orientation (width < height)."""
     viewport = config.get("viewport") or {}
     w = int(viewport.get("width", 390))
     h = int(viewport.get("height", 844))
@@ -20,5 +23,18 @@ def is_mobile_viewport(config: dict) -> bool:
 
 
 def device_label(config: dict) -> str:
-    """Return 'mobile' or 'desktop' based on viewport."""
-    return "mobile" if is_mobile_viewport(config) else "desktop"
+    """Return 'mobile', 'tablet', or 'desktop' based on viewport dimensions.
+
+    Portrait + narrow  → mobile
+    Portrait + wide    → tablet  (width >= _TABLET_MIN_WIDTH)
+    Landscape          → desktop
+    """
+    viewport = config.get("viewport") or {}
+    w = int(viewport.get("width", 390))
+    h = int(viewport.get("height", 844))
+
+    if w >= h:
+        return "desktop"
+    if w >= _TABLET_MIN_WIDTH:
+        return "tablet"
+    return "mobile"

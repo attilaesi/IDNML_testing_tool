@@ -171,6 +171,80 @@ Tests in the `ENVIRONMENT` category are always exempt from site plan exclusions.
 
 ---
 
+## Multi-Device Testing
+
+Run all tests across a canonical four-device suite in one command:
+
+```bash
+python -m tasks.run_multi_device
+```
+
+### Device suite
+
+| Key | Playwright profile | Viewport | Represents |
+|---|---|---|---|
+| `desktop` | Desktop Chrome | 1280×720 | Standard desktop / newsroom benchmark |
+| `mobile_ios` | iPhone 15 Pro | 393×659 | Modern iOS (~27% UK mobile share) |
+| `mobile_android` | Pixel 7 | 412×839 | Modern Android flagship |
+| `tablet` | iPad Pro 11 | 834×1194 | Dominant tablet form factor |
+
+Devices are defined in `config/device_config.py` (`DEVICE_SUITE`). Edit there to swap any device.
+
+### CLI options
+
+```bash
+# Run all four devices (default)
+python -m tasks.run_multi_device
+
+# Override site
+python -m tasks.run_multi_device --site independent_staging
+
+# Run a subset of devices
+python -m tasks.run_multi_device --devices desktop,mobile_ios
+
+# Run a specific test across all devices
+python -m tasks.run_multi_device --test pbjs_display_bidder_presence_test
+```
+
+### Output format
+
+1. **Per-device matrix** — the standard test × URL grid is printed after each device completes, prefixed with a device banner.
+2. **Cross-device summary** — a compact table printed once at the end:
+
+```
+=================================================================
+📊 CROSS-DEVICE SUMMARY (rows=tests, cols=devices)
+-----------------------------------------------------------------
+| Test                          | desktop | mobile_ios | tablet |
+| pbjs_display_bidder_presence  | PASS    | PASS       | PASS   |
+| gpt_page_type_test            | PASS    | FAIL (1/5) | PASS   |
+| env_is_mobile_or_tablet_test  | PASS    | PASS       | PASS   |
+-----------------------------------------------------------------
+```
+
+Cell values:
+- `PASS` — all URLs passed on that device
+- `FAIL (N/M)` — N out of M URLs failed or errored
+- `SKIP` — all URLs skipped
+- `MIXED` — mix of pass and skip (no failures)
+- `-` — no results recorded
+
+### Parallel device mode
+
+By default, devices run **sequentially** for clean, readable log output. To run all four devices concurrently (faster, but logs interleave), add to `base_config.py`:
+
+```python
+self.test_config["parallel_devices"] = True
+```
+
+### CSV output
+
+Multi-device runs write to separate files so single-device runs are not overwritten:
+- `output/output_multi_device.csv`
+- `output/output_by_pagetype_multi_device.csv`
+
+---
+
 ## Architecture Notes
 
 - **Device detection** — Playwright's built-in device profiles set viewport, UA, touch, and `is_mobile`. `core/device_helpers.py` derives `mobile`/`desktop` from viewport aspect ratio (portrait = mobile).
