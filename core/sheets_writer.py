@@ -11,17 +11,16 @@ Sheet structure
   Tab "mobile_ios"      — Same layout.
   Tab "mobile_android"  — Same layout.
   Tab "tablet"          — Same layout.
+  Tab "Appendix"        — Description + conditions for every test (from module docstrings).
+                          Test names in every other tab link here.
 
 Authentication
 ──────────────
-  Set env var GOOGLE_SERVICE_ACCOUNT_JSON to either:
-    • path to a service account JSON key file, OR
-    • the JSON content itself (useful in CI pipelines)
+  OAuth mode (recommended): set sheets_oauth_credentials in base_config to a
+  Desktop App OAuth client secret JSON.  First run opens a browser; after that
+  fully headless via cached refresh token.
 
-  Optionally set SHEETS_SHARE_EMAIL (or config["sheets_share_email"]) to
-  share the new spreadsheet with your personal Google account automatically.
-
-  See README → Google Sheets Setup for step-by-step instructions.
+  Service account fallback: set GOOGLE_SERVICE_ACCOUNT_JSON env var.
 """
 
 import asyncio
@@ -35,13 +34,6 @@ from core.base_test import TestResult, TestState
 
 
 # ── Colour palette (RGB 0-1 floats) ──────────────────────────────────────────
-#   #B7E1CD  pastel green  → PASS
-#   #F4C7C3  pastel red    → FAIL
-#   #E06666  strong red    → ERROR
-#   #F3F3F3  light grey    → SKIP / dash
-#   #FCE8B2  amber         → MIXED
-#   #1F3864  navy          → primary headers
-#   #445FA0  mid blue      → secondary headers
 _PALETTE: Dict[str, Tuple[float, float, float]] = {
     "pass":       (0.718, 0.882, 0.804),
     "fail":       (0.957, 0.780, 0.765),
@@ -137,6 +129,77 @@ def _agg_ck(cell: str) -> str:
     if t == "MIXED":
         return "mixed"
     return "dash"
+
+
+# ── Docstring helpers (for Appendix tab) ─────────────────────────────────────
+
+def _split_docstring(doc: str) -> Dict[str, str]:
+    """Parse a structured test module docstring into labelled sections."""
+    import re as _re
+    if not doc:
+        return {"label": "", "description": "", "conditions": "", "outcomes": ""}
+    lines = doc.splitlines()
+    label = lines[0].strip()
+    sections: Dict[str, str] = {
+        "label": label, "description": "", "conditions": "", "outcomes": "",
+    }
+    SECTION_KEYS = {
+        "what this test is meant to test": "description",
+        "what this test checks": "description",
+        "test conditions": "conditions",
+        "what counts as pass": "outcomes",
+    }
+    current_key: Optional[str] = None
+    buf: List[str] = []
+    i = 1
+    while i < len(lines):
+        line = lines[i]
+        next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if _re.match(r"^-{3,}$", next_line):
+            if current_key and buf:
+                sections[current_key] = "\n".join(buf).strip()
+                buf = []
+            for pattern, key in SECTION_KEYS.items():
+                if pattern in line.strip().lower():
+                    current_key = key
+                    i += 2
+                    break
+            else:
+                i += 1
+            continue
+        if current_key is not None:
+            buf.append(line)
+        i += 1
+    if current_key and buf:
+        sections[current_key] = "\n".join(buf).strip()
+    return sections
+
+
+def _collect_test_docs() -> Dict[str, Dict[str, str]]:
+    """Return {snake_test_name: parsed_docstring_sections} for every test file."""
+    import ast as _ast
+    from pathlib import Path
+    from core.base_test import _to_snake
+    tests_root = Path(__file__).resolve().parent.parent / "tests"
+    out: Dict[str, Dict[str, str]] = {}
+    for py_file in sorted(tests_root.rglob("*.py")):
+        if py_file.name.startswith("_"):
+            continue
+        if "test" not in py_file.name.lower():
+            continue
+        try:
+            src = py_file.read_text(encoding="utf-8")
+            tree = _ast.parse(src)
+            module_doc = _ast.get_docstring(tree)
+            for node in _ast.walk(tree):
+                if isinstance(node, _ast.ClassDef):
+                    snake = _to_snake(node.name)
+                    if snake:
+                        out[snake] = _split_docstring(module_doc)
+                    break
+        except Exception:
+            pass
+    return out
 
 
 # ── Writer ────────────────────────────────────────────────────────────────────
@@ -269,8 +332,6 @@ class SheetsWriter:
                 or os.getenv("SHEETS_DRIVE_FOLDER_ID")
             )
             if folder_id:
-                # Create directly in the user's Drive folder so it uses the
-                # user's storage quota rather than the service account's.
                 from google.auth.transport.requests import AuthorizedSession
                 session = AuthorizedSession(creds)
                 resp = session.post(
@@ -306,9 +367,27 @@ class SheetsWriter:
             except Exception as e:
                 print(f"   ⚠️  Share failed: {e}")
 
+        # ── Collect test docs and pre-compute Appendix row map ────────────────
+        test_docs = _collect_test_docs()
+        all_test_names_sorted = sorted({r.test_name for r in all_results if r.test_name})
+        # Row 1 = banner, Row 2 = headers, Row 3+ = data
+        appendix_row_map: Dict[str, int] = {
+            name: idx + 3 for idx, name in enumerate(all_test_names_sorted)
+        }
+
+        # Create Appendix worksheet early so we have its GID for hyperlinks
+        try:
+            appendix_ws = spreadsheet.add_worksheet(
+                title="Appendix", rows=len(all_test_names_sorted) + 10, cols=4
+            )
+            appendix_gid: int = appendix_ws.id
+        except Exception as e:
+            print(f"   ⚠️  Could not pre-create Appendix tab: {e}")
+            appendix_ws = None
+            appendix_gid = 0
+
         # Write per-device tabs first — need their GIDs for summary hyperlinks
         device_tab_info: Dict[str, Tuple[int, Dict[str, int]]] = {}
-        # key → (worksheet_gid, {test_name: row_number})
 
         for i, dk in enumerate(device_keys):
             dev_results = [r for r in all_results if getattr(r, "device", "") == dk]
@@ -318,29 +397,44 @@ class SheetsWriter:
             else:
                 ws = spreadsheet.add_worksheet(title=dk, rows=400, cols=40)
             try:
-                test_row_map = self._write_device_tab(ws, dev_results, dk, run_meta)
+                test_row_map = self._write_device_tab(
+                    ws, dev_results, dk, run_meta,
+                    appendix_gid=appendix_gid,
+                    appendix_row_map=appendix_row_map,
+                )
                 device_tab_info[dk] = (ws.id, test_row_map)
                 print(f"   ✅ {dk}")
             except Exception as e:
                 print(f"   ⚠️  Error writing tab '{dk}': {e}")
                 device_tab_info[dk] = (getattr(ws, "id", 0), {})
 
-        # Write Summary tab (last, so we have all GIDs)
+        # Write Summary tab
         try:
             summary_ws = spreadsheet.add_worksheet(title="Summary", rows=300, cols=20)
             self._write_summary_tab(
-                summary_ws, all_results, device_keys, device_tab_info, run_meta
+                summary_ws, all_results, device_keys, device_tab_info, run_meta,
+                appendix_gid=appendix_gid,
+                appendix_row_map=appendix_row_map,
             )
             print("   ✅ Summary")
         except Exception as e:
             print(f"   ⚠️  Error writing Summary tab: {e}")
 
-        # Move Summary to position 0
+        # Write Appendix data
+        if appendix_ws is not None:
+            try:
+                self._write_appendix_tab(appendix_ws, all_test_names_sorted, test_docs)
+                print("   ✅ Appendix")
+            except Exception as e:
+                print(f"   ⚠️  Error writing Appendix tab: {e}")
+
+        # Reorder: Summary first, then devices, Appendix last
         try:
             ws_by_title = {w.title: w for w in spreadsheet.worksheets()}
             ordered = (
                 ([ws_by_title["Summary"]] if "Summary" in ws_by_title else [])
                 + [ws_by_title[dk] for dk in device_keys if dk in ws_by_title]
+                + ([ws_by_title["Appendix"]] if "Appendix" in ws_by_title else [])
             )
             if ordered:
                 spreadsheet.reorder_worksheets(ordered)
@@ -358,6 +452,8 @@ class SheetsWriter:
         results: List[TestResult],
         device_key: str,
         run_meta: dict,
+        appendix_gid: int = 0,
+        appendix_row_map: Optional[Dict[str, int]] = None,
     ) -> Dict[str, int]:
         """
         Write test matrix, failure details, and URL key for one device.
@@ -379,6 +475,12 @@ class SheetsWriter:
 
         def fmt(r1, c1, r2, c2, f: CellFormat) -> None:
             fmts.append((_rng(r1, c1, r2, c2), f))
+
+        def _test_name_cell(test_name: str) -> str:
+            if appendix_gid and appendix_row_map and test_name in appendix_row_map:
+                arow = appendix_row_map[test_name]
+                return f'=HYPERLINK("#gid={appendix_gid}&range=A{arow}","{test_name}")'
+            return test_name
 
         urls = _stable_urls(results)
         page_types = _url_page_types(results)
@@ -441,7 +543,7 @@ class SheetsWriter:
             r = row()
             test_name_to_row[test_name] = r
 
-            row_data: List = [test_name]
+            row_data: List = [_test_name_cell(test_name)]
             row_states: List[Optional[TestState]] = []
 
             for u in urls:
@@ -571,6 +673,8 @@ class SheetsWriter:
         device_keys: List[str],
         device_tab_info: Dict[str, Tuple[int, Dict[str, int]]],
         run_meta: dict,
+        appendix_gid: int = 0,
+        appendix_row_map: Optional[Dict[str, int]] = None,
     ) -> None:
         from gspread_formatting import (
             CellFormat, Color, TextFormat,
@@ -588,6 +692,12 @@ class SheetsWriter:
 
         def fmt(r1, c1, r2, c2, f: CellFormat) -> None:
             fmts.append((_rng(r1, c1, r2, c2), f))
+
+        def _test_name_cell(test_name: str) -> str:
+            if appendix_gid and appendix_row_map and test_name in appendix_row_map:
+                arow = appendix_row_map[test_name]
+                return f'=HYPERLINK("#gid={appendix_gid}&range=A{arow}","{test_name}")'
+            return test_name
 
         n_dev = len(device_keys)
         total_cols = 1 + n_dev
@@ -678,7 +788,7 @@ class SheetsWriter:
 
         for test_name in all_test_names:
             r = row()
-            row_data: List = [test_name]
+            row_data: List = [_test_name_cell(test_name)]
 
             for ci, dk in enumerate(device_keys):
                 states = buckets.get((test_name, dk), [])
@@ -707,3 +817,86 @@ class SheetsWriter:
         if fmts:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=MATRIX_HEADER_ROW, cols=1)
+
+    # ── Appendix tab ──────────────────────────────────────────────────────────
+
+    def _write_appendix_tab(
+        self,
+        ws,
+        all_test_names: List[str],
+        test_docs: Dict[str, Dict[str, str]],
+    ) -> None:
+        """Write one row per test with description, conditions, and pass/fail outcomes."""
+        from gspread_formatting import (
+            CellFormat, Color, TextFormat,
+            format_cell_ranges, set_frozen,
+        )
+
+        def _c(key: str) -> Color:
+            return Color(*_PALETTE[key])
+
+        data: List[List] = []
+        fmts: List[Tuple] = []
+
+        def row() -> int:
+            return len(data) + 1
+
+        def fmt(r1, c1, r2, c2, f: CellFormat) -> None:
+            fmts.append((_rng(r1, c1, r2, c2), f))
+
+        # ── Row 1: banner ─────────────────────────────────────────────────────
+        r = row()
+        data.append(["TEST APPENDIX"])
+        fmt(r, 1, r, 4, CellFormat(
+            backgroundColor=_c("header_dk"),
+            textFormat=TextFormat(bold=True, foregroundColor=_c("white"), fontSize=14),
+        ))
+
+        # ── Row 2: column headers ─────────────────────────────────────────────
+        r = row()
+        data.append(["Test Name", "What it tests", "Conditions", "Pass / Fail / Skip"])
+        fmt(r, 1, r, 4, CellFormat(
+            backgroundColor=_c("header_md"),
+            textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
+        ))
+        HEADER_ROW = r
+
+        # ── One row per test ──────────────────────────────────────────────────
+        for test_name in all_test_names:
+            r = row()
+            doc = test_docs.get(test_name, {})
+            desc = doc.get("description", "")
+            cond = doc.get("conditions", "")
+            outcomes = doc.get("outcomes", "")
+            data.append([test_name, desc, cond, outcomes])
+            fmt(r, 1, r, 1, CellFormat(textFormat=TextFormat(bold=True)))
+            if not desc and not cond and not outcomes:
+                fmt(r, 2, r, 4, CellFormat(backgroundColor=_c("skip")))
+
+        # Wrap all text
+        total_rows = row() - 1
+        fmt(1, 1, total_rows, 4, CellFormat(wrapStrategy="WRAP"))
+
+        ws.update("A1", data, value_input_option="USER_ENTERED")
+        if fmts:
+            format_cell_ranges(ws, fmts)
+        set_frozen(ws, rows=HEADER_ROW, cols=1)
+
+        # Set column widths
+        try:
+            ws.spreadsheet.batch_update({"requests": [
+                {"updateDimensionProperties": {
+                    "range": {"sheetId": ws.id, "dimension": "COLUMNS",
+                              "startIndex": 0, "endIndex": 1},
+                    "properties": {"pixelSize": 280},
+                    "fields": "pixelSize",
+                }},
+                {"updateDimensionProperties": {
+                    "range": {"sheetId": ws.id, "dimension": "COLUMNS",
+                              "startIndex": 1, "endIndex": 4},
+                    "properties": {"pixelSize": 340},
+                    "fields": "pixelSize",
+                }},
+            ]})
+        except Exception:
+            pass
