@@ -503,29 +503,39 @@ class TestFramework:
         print(f"[WARMUP {warm_idx}/{total_warm}] {url}")
 
         auth_url = self._add_basic_auth_to_url(url)
-        await self._set_context_cookies(page, auth_url)
-        await page.goto(auth_url, wait_until="domcontentloaded")
+        nav_timeout = int(self.config.get("timeout", 30000))
 
-        if handle_cmp:
-            await self.cmp_handler.handle_consent(page)
+        try:
+            await self._set_context_cookies(page, auth_url)
+            await page.goto(auth_url, wait_until="domcontentloaded", timeout=nav_timeout)
+        except Exception as e:
+            print(f"[WARMUP {warm_idx}/{total_warm}] ⚠️  Skipped (navigation failed: {type(e).__name__})")
+            return
 
-        waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
-        await waiter.wait_for_prebid_and_gpt(page)
+        try:
+            if handle_cmp:
+                await self.cmp_handler.handle_consent(page)
 
-        await page.evaluate("""
-            async () => {
-                const delay = ms => new Promise(r => setTimeout(r, ms));
-                const total = document.body.scrollHeight;
-                const step = Math.max(600, Math.floor(total / 12));
-                for (let y = 0; y < total; y += step) {
-                    window.scrollTo(0, y);
-                    await delay(150);
+            waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
+            await waiter.wait_for_prebid_and_gpt(page)
+
+            await page.evaluate("""
+                async () => {
+                    const delay = ms => new Promise(r => setTimeout(r, ms));
+                    const total = document.body.scrollHeight;
+                    const step = Math.max(600, Math.floor(total / 12));
+                    for (let y = 0; y < total; y += step) {
+                        window.scrollTo(0, y);
+                        await delay(150);
+                    }
+                    window.scrollTo(0, total);
+                    await delay(300);
+                    window.scrollTo(0, 0);
                 }
-                window.scrollTo(0, total);
-                await delay(300);
-                window.scrollTo(0, 0);
-            }
-        """)
+            """)
+        except Exception as e:
+            print(f"[WARMUP {warm_idx}/{total_warm}] ⚠️  Partial warmup (post-nav error: {type(e).__name__})")
+            return
 
         print(f"[WARMUP {warm_idx}/{total_warm}] done")
 
