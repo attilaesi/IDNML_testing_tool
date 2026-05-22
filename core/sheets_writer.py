@@ -171,8 +171,10 @@ class SheetsWriter:
     # ── Auth ──────────────────────────────────────────────────────────────────
 
     def _build_client(self):
+        """Return (gspread_client, credentials) tuple."""
         try:
             import gspread
+            from google.oauth2.service_account import Credentials as SACredentials
         except ImportError:
             raise ImportError(
                 "gspread not installed.  Run: pip install gspread gspread-formatting"
@@ -186,9 +188,15 @@ class SheetsWriter:
                 "GOOGLE_SERVICE_ACCOUNT_JSON env var not set — "
                 "see README → Google Sheets Setup."
             )
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
         if os.path.isfile(sa_json):
-            return gspread.service_account(filename=sa_json)
-        return gspread.service_account_from_dict(json.loads(sa_json))
+            creds = SACredentials.from_service_account_file(sa_json, scopes=scopes)
+        else:
+            creds = SACredentials.from_service_account_info(json.loads(sa_json), scopes=scopes)
+        return gspread.Client(auth=creds), creds
 
     # ── Sync orchestrator ─────────────────────────────────────────────────────
 
@@ -208,7 +216,7 @@ class SheetsWriter:
             return None
 
         try:
-            client = self._build_client()
+            client, creds = self._build_client()
         except Exception as e:
             print(f"⚠️  Google Sheets auth failed: {e}")
             return None
@@ -226,7 +234,7 @@ class SheetsWriter:
                 # Create directly in the user's Drive folder so it uses the
                 # user's storage quota rather than the service account's.
                 from google.auth.transport.requests import AuthorizedSession
-                session = AuthorizedSession(client.auth)
+                session = AuthorizedSession(creds)
                 resp = session.post(
                     "https://www.googleapis.com/drive/v3/files",
                     json={
