@@ -428,7 +428,7 @@ class SheetsWriter:
         data.append(["Test"] + u_labels + ["Overall"])
         fmt(r, 1, r, total_cols, CellFormat(
             backgroundColor=_c("header_dk"),
-            textFormat=TextFormat(bold=True, foregroundColor=_c("white"), horizontalAlignment="CENTER"),
+            textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
             horizontalAlignment="CENTER",
         ))
         MATRIX_HEADER_ROW = r
@@ -664,7 +664,7 @@ class SheetsWriter:
         data.append(["Test"] + device_keys)
         fmt(r, 1, r, total_cols, CellFormat(
             backgroundColor=_c("header_dk"),
-            textFormat=TextFormat(bold=True, foregroundColor=_c("white"), horizontalAlignment="CENTER"),
+            textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
             horizontalAlignment="CENTER",
         ))
         MATRIX_HEADER_ROW = r
