@@ -171,31 +171,69 @@ class SheetsWriter:
     # ── Auth ──────────────────────────────────────────────────────────────────
 
     def _build_client(self):
-        """Return (gspread_client, credentials) tuple."""
-        try:
-            import gspread
-            from google.oauth2.service_account import Credentials as SACredentials
-        except ImportError:
-            raise ImportError(
-                "gspread not installed.  Run: pip install gspread gspread-formatting"
-            )
+        """Return (gspread_client, credentials) tuple.
+
+        OAuth mode (preferred): set SHEETS_OAUTH_CREDENTIALS to the path of the
+        OAuth client secret JSON (Desktop App type). Opens a browser on first run,
+        then caches a refresh token at ~/.config/gspread/ads-testing-token.json.
+        Files are created as the authenticated user — no service account quota issues.
+
+        Service account mode (fallback): set GOOGLE_SERVICE_ACCOUNT_JSON.
+        """
+        import gspread
+
+        SCOPES = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+
+        oauth_client_file = (
+            self.config.get("sheets_oauth_credentials")
+            or os.getenv("SHEETS_OAUTH_CREDENTIALS")
+        )
+
+        if oauth_client_file:
+            oauth_client_file = os.path.expanduser(oauth_client_file)
+        if oauth_client_file and os.path.isfile(oauth_client_file):
+            # ── OAuth user credentials ────────────────────────────────────────
+            from google.oauth2.credentials import Credentials as UserCredentials
+            from google_auth_oauthlib.flow import InstalledAppFlow
+            import google.auth.transport.requests
+
+            token_file = os.path.expanduser("~/.config/gspread/ads-testing-token.json")
+            os.makedirs(os.path.dirname(token_file), exist_ok=True)
+
+            creds = None
+            if os.path.isfile(token_file):
+                creds = UserCredentials.from_authorized_user_file(token_file, SCOPES)
+
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(google.auth.transport.requests.Request())
+                else:
+                    flow = InstalledAppFlow.from_client_secrets_file(oauth_client_file, SCOPES)
+                    creds = flow.run_local_server(port=0)
+                with open(token_file, "w") as f:
+                    f.write(creds.to_json())
+
+            return gspread.Client(auth=creds), creds
+
+        # ── Service account fallback ──────────────────────────────────────────
+        from google.oauth2.service_account import Credentials as SACredentials
+
         sa_json = (
             self.config.get("sheets_service_account_json")
             or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
         )
         if not sa_json:
             raise EnvironmentError(
-                "GOOGLE_SERVICE_ACCOUNT_JSON env var not set — "
-                "see README → Google Sheets Setup."
+                "Set SHEETS_OAUTH_CREDENTIALS (recommended) or "
+                "GOOGLE_SERVICE_ACCOUNT_JSON — see README → Google Sheets Setup."
             )
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
         if os.path.isfile(sa_json):
-            creds = SACredentials.from_service_account_file(sa_json, scopes=scopes)
+            creds = SACredentials.from_service_account_file(sa_json, scopes=SCOPES)
         else:
-            creds = SACredentials.from_service_account_info(json.loads(sa_json), scopes=scopes)
+            creds = SACredentials.from_service_account_info(json.loads(sa_json), scopes=SCOPES)
         return gspread.Client(auth=creds), creds
 
     # ── Sync orchestrator ─────────────────────────────────────────────────────
@@ -244,7 +282,9 @@ class SheetsWriter:
                     },
                     params={"fields": "id"},
                 )
-                resp.raise_for_status()
+                if not resp.ok:
+                    print(f"⚠️  Drive API error {resp.status_code}: {resp.text}")
+                    resp.raise_for_status()
                 spreadsheet = client.open_by_key(resp.json()["id"])
             else:
                 spreadsheet = client.create(title)

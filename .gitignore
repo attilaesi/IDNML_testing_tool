@@ -32,3 +32,7 @@ cmp_debug/*
 !output/.gitkeep
 !debug/.gitkeep
 !cmp_debug/.gitkeep
+
+# Service account key files — never commit
+ads-testing-*.json
+adunit-ads-testing-*.json

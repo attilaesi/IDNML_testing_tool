@@ -99,6 +99,9 @@ class TestConfig:
             "sheets_enabled": True,
             "sheets_share_email": "attila.horvath@independent.co.uk",
             "sheets_drive_folder_id": "105n-HOfxy_6hLDN-wgQBawb3ZNyUqyCA",
+            # OAuth user credentials (recommended — files created as you, no quota issues).
+            # First run opens a browser to authenticate; after that it's fully headless.
+            "sheets_oauth_credentials": "~/.config/adunit-oauth-client.json",
         }
 
         # Feature flag cookies for preprod (UAT / staging)
