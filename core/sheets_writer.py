@@ -881,22 +881,3 @@ class SheetsWriter:
         if fmts:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=HEADER_ROW, cols=1)
-
-        # Set column widths
-        try:
-            ws.spreadsheet.batch_update({"requests": [
-                {"updateDimensionProperties": {
-                    "range": {"sheetId": ws.id, "dimension": "COLUMNS",
-                              "startIndex": 0, "endIndex": 1},
-                    "properties": {"pixelSize": 280},
-                    "fields": "pixelSize",
-                }},
-                {"updateDimensionProperties": {
-                    "range": {"sheetId": ws.id, "dimension": "COLUMNS",
-                              "startIndex": 1, "endIndex": 4},
-                    "properties": {"pixelSize": 340},
-                    "fields": "pixelSize",
-                }},
-            ]})
-        except Exception:
-            pass
