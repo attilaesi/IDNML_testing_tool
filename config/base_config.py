@@ -96,8 +96,9 @@ class TestConfig:
         #   so it appears in your "Shared with me" Drive folder.
         #   Can also be set via SHEETS_SHARE_EMAIL env var.
         self.sheets_config = {
-            "sheets_enabled": False,
-            "sheets_share_email": "attila.horvath@independent.co.uk",  # e.g. "you@independent.co.uk"
+            "sheets_enabled": True,
+            "sheets_share_email": "attila.horvath@independent.co.uk",
+            "sheets_drive_folder_id": "105n-HOfxy_6hLDN-wgQBawb3ZNyUqyCA",
         }
 
         # Feature flag cookies for preprod (UAT / staging)

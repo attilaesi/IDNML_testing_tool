@@ -218,7 +218,28 @@ class SheetsWriter:
         title = f"Ad Tests — {ts}" + (f"  [{site}]" if site else "")
 
         try:
-            spreadsheet = client.create(title)
+            folder_id = (
+                self.config.get("sheets_drive_folder_id")
+                or os.getenv("SHEETS_DRIVE_FOLDER_ID")
+            )
+            if folder_id:
+                # Create directly in the user's Drive folder so it uses the
+                # user's storage quota rather than the service account's.
+                from google.auth.transport.requests import AuthorizedSession
+                session = AuthorizedSession(client.auth)
+                resp = session.post(
+                    "https://www.googleapis.com/drive/v3/files",
+                    json={
+                        "name": title,
+                        "mimeType": "application/vnd.google-apps.spreadsheet",
+                        "parents": [folder_id],
+                    },
+                    params={"fields": "id"},
+                )
+                resp.raise_for_status()
+                spreadsheet = client.open_by_key(resp.json()["id"])
+            else:
+                spreadsheet = client.create(title)
         except Exception as e:
             print(f"⚠️  Failed to create Google Sheet: {e}")
             return None
