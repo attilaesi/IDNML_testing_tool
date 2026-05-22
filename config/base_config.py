@@ -54,7 +54,10 @@ class TestConfig:
 
             # Run pages sequentially or in parallel
             "parallel_tests": True,
-            "concurrency": 2,  # only used when parallel_tests=True
+            "concurrency": 2,       # only used when parallel_tests=True
+
+            # Run all devices concurrently in multi-device runs
+            "parallel_devices": True,
 
             # Debug / robustness settings
             "debug_screenshots": False,    # CMP / failure screenshots
@@ -94,7 +97,7 @@ class TestConfig:
         #   Can also be set via SHEETS_SHARE_EMAIL env var.
         self.sheets_config = {
             "sheets_enabled": False,
-            "sheets_share_email": "",  # e.g. "you@independent.co.uk"
+            "sheets_share_email": "attila.horvath@independent.co.uk",  # e.g. "you@independent.co.uk"
         }
 
         # Feature flag cookies for preprod (UAT / staging)
