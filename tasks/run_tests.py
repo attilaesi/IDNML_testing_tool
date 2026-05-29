@@ -32,7 +32,7 @@ async def main():
         help=f"Site profile to use. One of: {', '.join(VALID_SITES)}",
     )
     parser.add_argument(
-        "--real_run",
+        "--regression",
         action="store_true",
         help="Upload results to Supabase and include regression diff in the sheet.",
     )
@@ -70,9 +70,9 @@ async def main():
 
     print_results(results, framework, CONFIG, _elapsed)
 
-    # Supabase upload + regression diff (--real_run only)
+    # Supabase upload + regression diff (--regression only)
     regression = None
-    if args.real_run and results:
+    if args.regression and results:
         from core.supabase_writer import (
             SupabaseResultsWriter, new_run_id,
             geo_from_results, publisher_from_results, environment_from_results,

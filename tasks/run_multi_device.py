@@ -106,7 +106,7 @@ async def main():
         ),
     )
     parser.add_argument(
-        "--real_run",
+        "--regression",
         action="store_true",
         help="Upload results to Supabase and include regression diff in the sheet.",
     )
@@ -180,10 +180,10 @@ async def main():
             device_keys=list(active_suite.keys()),
         )
 
-    # Supabase upload + regression diff (--real_run only)
+    # Supabase upload + regression diff (--regression only)
     combined_config = base_cfg.get_config()
     regression = None
-    if args.real_run and all_results:
+    if args.regression and all_results:
         from core.supabase_writer import (
             SupabaseResultsWriter, new_run_id,
             geo_from_results, publisher_from_results, environment_from_results,

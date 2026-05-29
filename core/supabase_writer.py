@@ -1,7 +1,7 @@
 """
 core/supabase_writer.py
 Writes per-run test results to Supabase and computes week-over-week regression diffs.
-Only called when --real_run is passed at the CLI.
+Only called when --regression is passed at the CLI.
 """
 
 import uuid

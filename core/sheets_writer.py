@@ -4,7 +4,7 @@ Write ad test results to a new timestamped Google Spreadsheet.
 
 Sheet structure
 ───────────────
-  Tab "regression"       — New vs known failures vs fixed (--real_run only).
+  Tab "regression"       — New vs known failures vs fixed (--regression only).
   Tab "test_run_summary" — Run header, per-device pass-rate counts, cross-device
                            comparison matrix.  FAIL/MIXED cells are hyperlinks that
                            jump directly to the relevant row in the device tab.
@@ -421,7 +421,7 @@ class SheetsWriter:
         except Exception as e:
             print(f"   ⚠️  Error writing test_run_summary tab: {e}")
 
-        # Write Regression tab (--real_run only)
+        # Write Regression tab (--regression only)
         regression = run_meta.get("regression")
         regression_ws = None
         if regression is not None:

@@ -23,7 +23,7 @@ python -m tasks.run_tests --test pbjs_display_bidder_presence_test
 python -m tasks.run_tests --site independent_uat
 
 # Upload results to Supabase + include regression diff in the sheet
-python -m tasks.run_tests --real_run
+python -m tasks.run_tests --regression
 
 # Run via BrowserStack Automate (requires Automate plan + credentials in env.local)
 python -m tasks.run_tests --browserstack
@@ -172,7 +172,7 @@ self.light_ad_rules = None   # leave unset (page default)
 
 - **Terminal** — pass/fail counts, per-URL breakdown, failure details with error messages, and a run banner clearly showing whether you're running locally or via BrowserStack
 - **Google Sheets** — timestamped spreadsheet created after every run (see below)
-- **Supabase** — results uploaded for week-over-week regression tracking when `--real_run` is passed
+- **Supabase** — results uploaded for week-over-week regression tracking when `--regression` is passed
 
 ---
 
@@ -211,7 +211,7 @@ python -m tasks.run_multi_device --devices desktop,mobile_ios
 python -m tasks.run_multi_device --test pbjs_display_bidder_presence_test
 
 # Upload results + regression diff
-python -m tasks.run_multi_device --real_run
+python -m tasks.run_multi_device --regression
 
 # Run via BrowserStack
 python -m tasks.run_multi_device --browserstack
@@ -346,11 +346,11 @@ After a run, go to **BrowserStack Automate → Build Runs** → click the **IDNM
 
 ## Supabase / Regression Tracking
 
-Pass `--real_run` to any task to upload results to Supabase and include a week-over-week regression diff in the Google Sheet.
+Pass `--regression` to any task to upload results to Supabase and include a week-over-week regression diff in the Google Sheet.
 
 ```bash
-python -m tasks.run_tests --real_run
-python -m tasks.run_multi_device --real_run
+python -m tasks.run_tests --regression
+python -m tasks.run_multi_device --regression
 ```
 
 Supabase credentials are read from `env.local`:
