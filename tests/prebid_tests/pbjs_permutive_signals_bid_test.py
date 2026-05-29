@@ -2,18 +2,28 @@
 """
 prebid: PbjsPermutiveSignalsBidTest
 
-Checks outgoing Prebid bidder requests for Permutive RTD signals for:
-  - appnexus
-  - ix
-  - rubicon
-  - msft
+What this test checks
+---------------------
+Inspects outgoing Prebid bidder requests (RTB payload) to verify that Permutive RTD
+signals are present for required bidders: ix, rubicon, msft, pubmatic.
 
-We inspect the bidder *requests* (RTB payload) rather than Prebid config.
+Signals validated per required bidder:
+  - user.ext.data.p_standard   (array of standard cohort IDs)
+  - user.ext.data.permutive    (array of custom cohort IDs)
+  - user.keywords              (contains p_standard=..., p_standard_aud=..., permutive=...)
 
-Signals we validate (per required bidder):
-  - user.ext.data.p_standard      (array of standard cohort IDs)
-  - user.ext.data.permutive       (array of custom cohort IDs)
-  - user.keywords                 (string/array containing p_standard=..., p_standard_aud=..., permutive=...)
+Test conditions
+---------------
+- window.pbjs must be present (otherwise skipped).
+- At least one required bidder must have made requests (otherwise skipped).
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: all required bidders that made requests have the expected Permutive signal paths
+  present with non-empty values.
+- FAILED: a required bidder made requests but is missing one or more Permutive signal paths.
+- SKIPPED: window.pbjs missing, no bidder requests found, or none of the required bidders
+  made requests (e.g. non-display page).
 """
 
 from typing import Dict, List, Any

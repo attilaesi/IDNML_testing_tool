@@ -2,20 +2,27 @@
 """
 prebid: PbjsMantisSignalsBidTest
 
-Checks outgoing Prebid bidder requests for Mantis signals.
+What this test checks
+---------------------
+Inspects outgoing Prebid bidder requests (RTB payload) to verify that Mantis contextual
+signals are present in every bidder's request:
+  - site.ext.data.mantis        (brand safety labels, e.g. "Technology-GREEN")
+  - site.ext.data.mantis_context (topic tokens, e.g. "tech_news")
 
-We inspect bidder *requests* (RTB payload) rather than Prebid config.
+Test conditions
+---------------
+- window.pbjs must be present (otherwise skipped).
+- At least one bidder must have made requests (otherwise skipped).
+- Both paths must exist, be non-empty arrays, and match expected formats:
+    - mantis: entries matching <label>-<GREEN|AMBER|RED>
+    - mantis_context: lowercase snake_case tokens
 
-Paths inspected (per bidder request):
-  - site.ext.data.mantis
-  - site.ext.data.mantis_context
-
-Option C (strict validation):
-  - Both paths must exist for each bidder that made requests
-  - Both must be arrays
-  - Both must be non-empty
-  - mantis entries must match: <label>-<GREEN|AMBER|RED>
-  - mantis_context entries must match: lowercase snake_case tokens
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: both site.ext.data.mantis and site.ext.data.mantis_context are present,
+  non-empty arrays with correctly formatted entries for every bidder that made requests.
+- FAILED: either path is missing, wrong type, empty, or contains malformed entries.
+- SKIPPED: window.pbjs missing or no bidder requests found.
 """
 
 from typing import List, Any, Dict

@@ -1,3 +1,23 @@
+"""
+prebid: PbjsPrebidWarningsTest
+
+What this test checks
+---------------------
+Monitors Prebid console output for "invalid bid sent to bidder" warnings, which
+indicate malformed bid objects being rejected. Captures the offending bidder codes
+and ad slot paths (adslot / gpid) from the console messages.
+
+Test conditions
+---------------
+- window.pbjs must be present (otherwise skipped).
+- Console messages are captured during the test wait window after DOM ready.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: no "invalid bid sent to bidder" messages observed.
+- FAILED: one or more invalid-bid messages found; reports bidder and ad slot.
+- SKIPPED: window.pbjs not present on the page.
+"""
 import re
 from typing import Any, Dict, List
 

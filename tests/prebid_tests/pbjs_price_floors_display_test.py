@@ -1,3 +1,27 @@
+"""
+prebid: PbjsPriceFloorsDisplayTest
+
+What this test checks
+---------------------
+Validates that Prebid price floors are configured and active for DISPLAY auctions.
+Uses window.__pbjsBidEventsDisplay (populated by BrowserManager) to confirm display
+activity occurred, then checks the priceFloors module and rule configuration.
+
+Test conditions
+---------------
+- window.__pbjsBidEventsDisplay must be present and contain bidRequested events.
+- If no display activity is observed the test is skipped (cannot validate floors).
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: priceFloors module installed (or config present), enabled, floor rules exist,
+  and at least one display-applicable rule is configured.
+- FAILED: priceFloors module not installed and no floors config present.
+- FAILED: floors config present but disabled (floors.enabled === false).
+- FAILED: floors config enabled but no floor rules configured.
+- FAILED: no display-applicable floor rules found.
+- SKIPPED: no display Prebid activity observed on this page.
+"""
 # tests/prebid_tests/pbjs_prebid_price_floors_display_test.py
 
 from typing import Any, Dict, List, Optional

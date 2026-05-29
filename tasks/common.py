@@ -1,6 +1,7 @@
 # tasks/common.py
 # Shared output / summary helpers used by run_tests.py and future task scripts.
 
+import os
 import time
 from collections import defaultdict
 from typing import List, Dict, Tuple
@@ -8,6 +9,27 @@ from typing import List, Dict, Tuple
 from core.base_test import TestState
 from core.ansi import green, red, yellow, dim
 from core.framework_manager import TestFramework
+
+
+def print_runner_banner(config: dict, label: str = "AD TEST RUN") -> None:
+    """Print a clear header showing execution target (local Playwright vs BrowserStack)."""
+    width = 60
+    print("=" * width)
+    print(f"  {label}")
+    print(f"  site    : {config.get('active_site', '')}  ({config.get('site_url', '')})")
+    print(f"  device  : {config.get('device_name', 'Desktop Chrome')}")
+    print(f"  pages   : {config.get('max_pages', 10)}")
+
+    if config.get("browserstack_enabled"):
+        bs_user = os.getenv("BROWSERSTACK_USERNAME", "")
+        session = config.get("bs_session_name", "Ad Test")
+        build   = config.get("bs_build_name", "IDNML")
+        print(f"  runner  : BROWSERSTACK  {bs_user} | build={build} | session={session}")
+    else:
+        headless = config.get("headless", True)
+        print(f"  runner  : local Playwright  (headless={headless})")
+
+    print("=" * width)
 
 
 

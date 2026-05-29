@@ -64,6 +64,11 @@ def get_context_environment(config: dict, url: str) -> str:
     return env.lower() if env else env_from_url(url)
 
 
+def bidder_lookup_env(env: str) -> str:
+    """UAT and staging share the same bidder set as prod — always query prod rows."""
+    return "prod"
+
+
 def has_explicit_ctx(config: dict) -> bool:
     return bool(norm(config.get("publisher") or config.get("publication"))) or bool(
         norm(config.get("environment") or config.get("env"))

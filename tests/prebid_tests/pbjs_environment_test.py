@@ -1,3 +1,24 @@
+"""
+prebid: PbjsPrebidEnvironmentTest
+
+What this test checks
+---------------------
+Smoke test verifying that Prebid.js is loaded and minimally functional:
+  - window.pbjs is present.
+  - pbjs.que is initialised as an array.
+  - At least one Prebid module is installed (pbjs.installedModules non-empty).
+
+Test conditions
+---------------
+- No conditions; test always runs.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: pbjs present, queue initialised, and at least one module installed.
+- FAILED: window.pbjs missing.
+- FAILED: pbjs.que not initialised as an array.
+- FAILED: pbjs.installedModules is empty (no modules loaded).
+"""
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
 

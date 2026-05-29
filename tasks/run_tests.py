@@ -10,7 +10,7 @@ from datetime import datetime
 from config.base_config import TestConfig
 from core.framework_manager import TestFramework
 from core.device_helpers import device_label
-from tasks.common import print_results
+from tasks.common import print_results, print_runner_banner
 
 VALID_SITES = [
     "independent", "independent_uat", "independent_staging",
@@ -31,21 +31,28 @@ async def main():
         choices=VALID_SITES,
         help=f"Site profile to use. One of: {', '.join(VALID_SITES)}",
     )
+    parser.add_argument(
+        "--real_run",
+        action="store_true",
+        help="Upload results to Supabase and include regression diff in the sheet.",
+    )
+    parser.add_argument(
+        "--browserstack",
+        action="store_true",
+        help="Run via BrowserStack Automate instead of local Playwright.",
+    )
     args = parser.parse_args()
 
     cfg = TestConfig()
     if args.site:
         cfg.active_site = args.site
+    if args.browserstack:
+        cfg.browserstack_config["browserstack_enabled"] = True
     CONFIG = cfg.get_config()
 
-    print("🚀 Ad Testing Framework")
-    print(f"Active site: {CONFIG.get('active_site', '')}")
-    print(f"Site URL: {CONFIG.get('site_url', '')}")
-    print(f"Max pages: {CONFIG.get('max_pages', 10)}")
-    print(f"Mobile mode: {CONFIG.get('mobile', False)}")
-    print(f"Headless: {CONFIG.get('headless', True)}")
+    print_runner_banner(CONFIG, label="AD TEST RUN")
     if args.test:
-        print(f"🎯 Single-test mode: {args.test}")
+        print(f"  filter  : {args.test}")
     print("-" * 50)
 
     framework = TestFramework(CONFIG)
@@ -63,13 +70,23 @@ async def main():
 
     print_results(results, framework, CONFIG, _elapsed)
 
-    if bool(CONFIG.get("write_text_report", True)):
-        from tasks.common import _get_url_order
-        url_order = _get_url_order(framework, results)
-        try:
-            await framework.csv_writer.write_text_report(results, urls=url_order)
-        except Exception:
-            pass
+    # Supabase upload + regression diff (--real_run only)
+    regression = None
+    if args.real_run and results:
+        from core.supabase_writer import (
+            SupabaseResultsWriter, new_run_id,
+            geo_from_results, publisher_from_results, environment_from_results,
+        )
+        ts_iso = datetime.utcnow().isoformat() + "Z"
+        run_id = new_run_id()
+        geo = geo_from_results(results)
+        publisher = publisher_from_results(results)
+        environment = environment_from_results(results)
+        print("\n📤 Uploading results to Supabase…")
+        sw = SupabaseResultsWriter(CONFIG)
+        await sw.write_results(results, run_id, ts_iso)
+        print("📊 Fetching regression diff…")
+        regression = await sw.fetch_regression_diff(run_id, publisher, environment, geo)
 
     # Google Sheets output (single-device run — one device tab + Summary)
     if bool(CONFIG.get("sheets_enabled", False)) and results:
@@ -82,6 +99,7 @@ async def main():
             "site": CONFIG.get("active_site", ""),
             "env": env_from_url(CONFIG.get("site_url", "")),
             "device_names": {dev_key: dev_name},
+            "regression": regression,
         }
         writer = SheetsWriter(CONFIG)
         sheet_url = await writer.write_report(

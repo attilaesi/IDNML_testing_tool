@@ -21,7 +21,7 @@ from config.device_config import DEVICE_SUITE
 from core.framework_manager import TestFramework
 from core.ansi import dim
 from core.url_context_helpers import env_from_url
-from tasks.common import print_results, _get_url_order
+from tasks.common import print_results, print_runner_banner, _get_url_order
 
 VALID_SITES = [
     "independent", "independent_uat", "independent_staging",
@@ -76,7 +76,6 @@ async def _run_one_device(
     t0 = time.monotonic()
     results = await framework.run_tests(
         test_names=test_names,
-        write_csv=False,   # combined CSV written at the end
     )
     elapsed = time.monotonic() - t0
 
@@ -106,12 +105,24 @@ async def main():
             "Omit to run all four."
         ),
     )
+    parser.add_argument(
+        "--real_run",
+        action="store_true",
+        help="Upload results to Supabase and include regression diff in the sheet.",
+    )
+    parser.add_argument(
+        "--browserstack",
+        action="store_true",
+        help="Run via BrowserStack Automate instead of local Playwright.",
+    )
     args = parser.parse_args()
 
     # Build base config (site selection, URLs, etc.)
     base_cfg = TestConfig()
     if args.site:
         base_cfg.active_site = args.site
+    if args.browserstack:
+        base_cfg.browserstack_config["browserstack_enabled"] = True
 
     # Resolve which devices to run
     if args.devices:
@@ -134,13 +145,11 @@ async def main():
     site_id = sample_config.get("active_site", "")
     site_url = sample_config.get("site_url", "")
 
-    print("=" * 60)
-    print("  MULTI-DEVICE AD TEST RUN")
-    print(f"  site    : {site_id}  ({site_url})")
+    print_runner_banner(sample_config, label="MULTI-DEVICE AD TEST RUN")
     print(f"  devices : {', '.join(active_suite)}")
     print(f"  mode    : {'parallel' if parallel_devices else 'sequential'}")
     if test_names:
-        print(f"  test    : {test_names[0]}")
+        print(f"  filter  : {test_names[0]}")
     print("=" * 60)
 
     all_results = []
@@ -171,21 +180,24 @@ async def main():
             device_keys=list(active_suite.keys()),
         )
 
-    # Combined CSV (one file covering all devices)
-    # Re-use the csv_writer from a throwaway framework instance
+    # Supabase upload + regression diff (--real_run only)
     combined_config = base_cfg.get_config()
-    combined_config["output_file"] = combined_config.get("output_file", "output/output.csv").replace(
-        ".csv", "_multi_device.csv"
-    )
-    combined_config["output_pagetype_file"] = combined_config.get(
-        "output_pagetype_file", "output/output_by_pagetype.csv"
-    ).replace(".csv", "_multi_device.csv")
-    combined_fw = TestFramework(combined_config)
-    try:
-        await combined_fw.csv_writer.write_main(all_results)
-        await combined_fw.csv_writer.write_pagetype_summary(all_results)
-    except Exception as e:
-        print(dim(f"⚠️  CSV write error: {e}"))
+    regression = None
+    if args.real_run and all_results:
+        from core.supabase_writer import (
+            SupabaseResultsWriter, new_run_id,
+            geo_from_results, publisher_from_results, environment_from_results,
+        )
+        ts_iso = datetime.utcnow().isoformat() + "Z"
+        run_id = new_run_id()
+        geo = geo_from_results(all_results)
+        publisher = publisher_from_results(all_results)
+        environment = environment_from_results(all_results)
+        print("\n📤 Uploading results to Supabase…")
+        sw = SupabaseResultsWriter(combined_config)
+        await sw.write_results(all_results, run_id, ts_iso)
+        print("📊 Fetching regression diff…")
+        regression = await sw.fetch_regression_diff(run_id, publisher, environment, geo)
 
     # Google Sheets output
     if bool(combined_config.get("sheets_enabled", False)) and all_results:
@@ -195,6 +207,7 @@ async def main():
             "site": combined_config.get("active_site", ""),
             "env": env_from_url(combined_config.get("site_url", "")),
             "device_names": dict(active_suite),
+            "regression": regression,
         }
         writer = SheetsWriter(combined_config)
         sheet_url = await writer.write_report(

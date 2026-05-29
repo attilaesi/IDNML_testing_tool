@@ -138,13 +138,6 @@ async def main():
 
     print_results(results, framework, config, _elapsed)
 
-    if bool(config.get("write_text_report", True)):
-        url_order = _get_url_order(framework, results)
-        try:
-            await framework.csv_writer.write_text_report(results, urls=url_order)
-        except Exception:
-            pass
-
     print()
 
 

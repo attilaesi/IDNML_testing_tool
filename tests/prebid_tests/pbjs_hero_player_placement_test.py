@@ -3,35 +3,25 @@ prebid: PbjsHeroPlayerPlacementTest (VIDEO)
 
 What this test checks
 ---------------------
-For the video ad unit "hero_player", find Prebid bidRequested events from the
-VIDEO event store and inspect each bid object.
+For the video ad unit "hero_player", inspects Prebid bidRequested events from the
+VIDEO event store and validates each bid's placement fields:
+  - Both `placement` and `plcmt` must be present.
+  - Both must equal the expected value (1 by default).
+  - Both must match each other (placement == plcmt).
 
-For each bidder that submitted a bid for hero_player, verify:
-  - BOTH placement and plcmt exist
-  - BOTH are valid (expected 1 by default)
-  - BOTH match (placement == plcmt)
+Test conditions
+---------------
+- Page must be a video page (pageType == video); otherwise skipped.
+- window.pbjs must be present (otherwise skipped).
+- window.__pbjsBidEventsVideo (or fallback __pbjsBidEvents) must contain
+  hero_player bidRequested events; otherwise skipped.
 
-Primary data source
--------------------
-Prefer:
-  - window.__pbjsBidEventsVideo   (new split store)
-
-Fallbacks (backwards compatibility):
-  - window.__pbjsBidEvents        (legacy single store)
-
-Pass / Fail / Skipped semantics
--------------------------------
-* SKIPPED:
-    - window.pbjs missing, or
-    - event store missing/empty, or
-    - no hero_player bids found in bidRequested events
-
-* FAILED:
-    - at least one bidder has a hero_player bid where placement/plcmt is missing,
-      invalid, or mismatched
-
-* PASSED:
-    - all bidders with hero_player bids have placement + plcmt present, valid, and equal
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: all bidders with hero_player bids have placement + plcmt present, valid, and equal.
+- FAILED: at least one bidder's hero_player bid is missing placement or plcmt, has an
+  invalid value, or placement != plcmt.
+- SKIPPED: window.pbjs missing, event store missing/empty, or no hero_player bids found.
 """
 
 from typing import Any, Dict, List

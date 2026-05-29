@@ -47,6 +47,17 @@ class TestConfig:
             "device_name": ACTIVE_DEVICE,
         }
 
+        # BrowserStack Automate — off by default.
+        # Enable via --browserstack CLI flag or set browserstack_enabled=True here.
+        # Credentials are read from BROWSERSTACK_USERNAME / BROWSERSTACK_ACCESS_KEY env vars.
+        # bs_build_name groups sessions in the BrowserStack dashboard.
+        # bs_session_name labels individual sessions.
+        self.browserstack_config = {
+            "browserstack_enabled": False,
+            "bs_build_name": "IDNML",
+            "bs_session_name": "Ad Test",
+        }
+
         # Framework / test behaviour
         self.test_config = {
             # Max number of URLs from the site profile to test in one run
@@ -78,8 +89,6 @@ class TestConfig:
 
         # Output configuration
         self.output_config = {
-            "output_file": "output/output.csv",
-            "output_pagetype_file": "output/output_by_pagetype.csv",
             "cmp_debug_dir": "output/cmp_debug",
         }
 
@@ -123,6 +132,7 @@ class TestConfig:
         config.update(self.output_config)
         config.update(self.taboola_config)
         config.update(self.sheets_config)
+        config.update(self.browserstack_config)
 
         # Attach cookies (application is decided in framework_manager based on URL)
         config["preprod_cookies"] = self.preprod_cookies

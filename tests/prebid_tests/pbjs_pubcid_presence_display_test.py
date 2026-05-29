@@ -1,3 +1,24 @@
+"""
+prebid: PbjsDisplayPubcidPresenceTest
+
+What this test checks
+---------------------
+Validates that PubCommonId (pubcid) is present in every display bidder's requests.
+Inspects bids in window.__pbjsBidEventsDisplay for userId.pubCommonId or a matching
+userIdAsEids entry (source hints pubcommon / pubcid).
+
+Test conditions
+---------------
+- window.pbjs must be present (otherwise skipped).
+- DISPLAY bidRequested events must have been captured.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: every display bidder has pubcid in at least one of its bids.
+- FAILED: pbjs present but no DISPLAY bidRequested events captured.
+- FAILED: at least one display bidder is missing pubcid across all of its bids.
+- SKIPPED: window.pbjs not present on the page.
+"""
 from core.base_test import BaseTest, TestResult, TestState
 
 class PbjsDisplayPubcidPresenceTest(BaseTest):

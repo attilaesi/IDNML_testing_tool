@@ -1,3 +1,23 @@
+"""
+prebid: PbjsPrebidTimeoutConfigTest
+
+What this test checks
+---------------------
+Validates that a Prebid bid timeout is configured and falls within the acceptable
+range (100–5000 ms). Reads pbjs.getConfig() and checks bidderTimeout, timeout,
+or auctionTimeout in that priority order.
+
+Test conditions
+---------------
+- window.pbjs and pbjs.getConfig must be present.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: a timeout is configured and its value is between 100–5000 ms.
+- FAILED: no timeout configured (no bidderTimeout / timeout / auctionTimeout in config).
+- FAILED: timeout is below 100 ms (unrealistically low).
+- FAILED: timeout exceeds 5000 ms (unrealistically high).
+"""
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
 

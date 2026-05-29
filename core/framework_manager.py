@@ -21,7 +21,6 @@ from core.ansi import colour_cell, colour_state, dim
 from config.site_test_plans import SITE_TEST_PLANS
 
 from core.framework.discovery import discover_tests, get_tests_by_category
-from core.framework.csv_writer import CSVWriter
 
 
 class TestFramework:
@@ -34,9 +33,6 @@ class TestFramework:
 
         # Hold onto a warmup page so we can reuse it for tests
         self._warm_page = None
-
-        # CSV writer helper
-        self.csv_writer = CSVWriter(config)
 
         # Keep URL order for the session (so matrix cols are stable)
         self.selected_urls: List[str] = []
@@ -807,7 +803,6 @@ class TestFramework:
         self,
         test_names: Optional[List[str]] = None,
         category: str = None,
-        write_csv: bool = True,
     ) -> List[TestResult]:
         """Run specified tests, using either single-page mode or parallel mode."""
         results: List[TestResult] = []
@@ -924,10 +919,6 @@ class TestFramework:
         # Close browser/context (this closes all pages, including warmup page)
         await self.browser_manager.close()
         self._warm_page = None
-
-        if write_csv:
-            await self.csv_writer.write_main(results)
-            await self.csv_writer.write_pagetype_summary(results)
 
         if bool(self.config.get("print_matrix_summary", True)):
             self._print_matrix_summary(results, self.selected_urls)

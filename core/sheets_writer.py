@@ -4,15 +4,16 @@ Write ad test results to a new timestamped Google Spreadsheet.
 
 Sheet structure
 ───────────────
-  Tab "Summary"         — Run header, per-device pass-rate counts, cross-device
-                          comparison matrix.  FAIL/MIXED cells are hyperlinks that
-                          jump directly to the relevant row in the device tab.
-  Tab "desktop"         — Test × URL matrix, failure details, URL key.
-  Tab "mobile_ios"      — Same layout.
-  Tab "mobile_android"  — Same layout.
-  Tab "tablet"          — Same layout.
-  Tab "Appendix"        — Description + conditions for every test (from module docstrings).
-                          Test names in every other tab link here.
+  Tab "regression"       — New vs known failures vs fixed (--real_run only).
+  Tab "test_run_summary" — Run header, per-device pass-rate counts, cross-device
+                           comparison matrix.  FAIL/MIXED cells are hyperlinks that
+                           jump directly to the relevant row in the device tab.
+  Tab "desktop"          — Test × URL matrix, failure details, URL key.
+  Tab "mobile_ios"       — Same layout.
+  Tab "mobile_android"   — Same layout.
+  Tab "tablet"           — Same layout.
+  Tab "appendix"         — Description + conditions for every test (from module docstrings).
+                           Test names in every other tab link here.
 
 Authentication
 ──────────────
@@ -378,7 +379,7 @@ class SheetsWriter:
         # Create Appendix worksheet early so we have its GID for hyperlinks
         try:
             appendix_ws = spreadsheet.add_worksheet(
-                title="Appendix", rows=len(all_test_names_sorted) + 10, cols=4
+                title="appendix", rows=len(all_test_names_sorted) + 10, cols=4
             )
             appendix_gid: int = appendix_ws.id
         except Exception as e:
@@ -408,17 +409,32 @@ class SheetsWriter:
                 print(f"   ⚠️  Error writing tab '{dk}': {e}")
                 device_tab_info[dk] = (getattr(ws, "id", 0), {})
 
-        # Write Summary tab
+        # Write test_run_summary tab
         try:
-            summary_ws = spreadsheet.add_worksheet(title="Summary", rows=300, cols=20)
+            summary_ws = spreadsheet.add_worksheet(title="test_run_summary", rows=300, cols=20)
             self._write_summary_tab(
                 summary_ws, all_results, device_keys, device_tab_info, run_meta,
                 appendix_gid=appendix_gid,
                 appendix_row_map=appendix_row_map,
             )
-            print("   ✅ Summary")
+            print("   ✅ test_run_summary")
         except Exception as e:
-            print(f"   ⚠️  Error writing Summary tab: {e}")
+            print(f"   ⚠️  Error writing test_run_summary tab: {e}")
+
+        # Write Regression tab (--real_run only)
+        regression = run_meta.get("regression")
+        regression_ws = None
+        if regression is not None:
+            try:
+                regression_ws = spreadsheet.add_worksheet(title="regression", rows=200, cols=6)
+                self._write_regression_tab(
+                    regression_ws, regression,
+                    appendix_gid=appendix_gid,
+                    appendix_row_map=appendix_row_map,
+                )
+                print("   ✅ Regression")
+            except Exception as e:
+                print(f"   ⚠️  Error writing Regression tab: {e}")
 
         # Write Appendix data
         if appendix_ws is not None:
@@ -428,13 +444,14 @@ class SheetsWriter:
             except Exception as e:
                 print(f"   ⚠️  Error writing Appendix tab: {e}")
 
-        # Reorder: Summary first, then devices, Appendix last
+        # Reorder: test_run_summary first, then devices, Regression, Appendix last
         try:
             ws_by_title = {w.title: w for w in spreadsheet.worksheets()}
             ordered = (
-                ([ws_by_title["Summary"]] if "Summary" in ws_by_title else [])
+                ([ws_by_title["regression"]] if "regression" in ws_by_title else [])
+                + ([ws_by_title["test_run_summary"]] if "test_run_summary" in ws_by_title else [])
                 + [ws_by_title[dk] for dk in device_keys if dk in ws_by_title]
-                + ([ws_by_title["Appendix"]] if "Appendix" in ws_by_title else [])
+                + ([ws_by_title["appendix"]] if "appendix" in ws_by_title else [])
             )
             if ordered:
                 spreadsheet.reorder_worksheets(ordered)
@@ -443,6 +460,28 @@ class SheetsWriter:
 
         print(f"\n📊 Report: {url}")
         return url
+
+    # ── Column width helper ───────────────────────────────────────────────────
+
+    def _set_column_widths(self, ws, col_widths: Dict[int, int]) -> None:
+        """Set pixel widths for columns. col_widths keys are 0-based column indices."""
+        requests = [
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": ws.id,
+                        "dimension": "COLUMNS",
+                        "startIndex": col_idx,
+                        "endIndex": col_idx + 1,
+                    },
+                    "properties": {"pixelSize": px},
+                    "fields": "pixelSize",
+                }
+            }
+            for col_idx, px in col_widths.items()
+        ]
+        if requests:
+            ws.spreadsheet.batch_update({"requests": requests})
 
     # ── Per-device tab ────────────────────────────────────────────────────────
 
@@ -662,6 +701,14 @@ class SheetsWriter:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=MATRIX_HEADER_ROW, cols=1)
 
+        fmt(1, 1, row() - 1, total_cols, CellFormat(verticalAlignment="TOP"))
+
+        col_widths = {0: 220}
+        for i in range(n_url_cols):
+            col_widths[1 + i] = 100
+        col_widths[1 + n_url_cols] = 130
+        self._set_column_widths(ws, col_widths)
+
         return test_name_to_row
 
     # ── Summary tab ───────────────────────────────────────────────────────────
@@ -818,6 +865,135 @@ class SheetsWriter:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=MATRIX_HEADER_ROW, cols=1)
 
+        fmt(1, 1, row() - 1, total_cols, CellFormat(verticalAlignment="TOP"))
+
+        # Col 0: test name, col 1: playwright profile, cols 2-5: counts, rest: device cols
+        col_widths = {0: 220, 1: 170, 2: 70, 3: 70, 4: 70, 5: 70}
+        for i in range(n_dev):
+            col_widths.setdefault(1 + i, 130)
+        self._set_column_widths(ws, col_widths)
+
+    # ── Regression tab ────────────────────────────────────────────────────────
+
+    def _write_regression_tab(
+        self,
+        ws,
+        regression: dict,
+        appendix_gid: int = 0,
+        appendix_row_map: Optional[Dict[str, int]] = None,
+    ) -> None:
+        from gspread_formatting import (
+            CellFormat, Color, TextFormat,
+            format_cell_ranges, set_frozen,
+        )
+
+        def _c(key: str) -> Color:
+            return Color(*_PALETTE[key])
+
+        def _test_name_cell(test_name: str) -> str:
+            if appendix_gid and appendix_row_map and test_name in appendix_row_map:
+                arow = appendix_row_map[test_name]
+                return f'=HYPERLINK("#gid={appendix_gid}&range=A{arow}","{test_name}")'
+            return test_name
+
+        data: List[List] = []
+        fmts: List[Tuple] = []
+
+        def row() -> int:
+            return len(data) + 1
+
+        def fmt(r1, c1, r2, c2, f: CellFormat) -> None:
+            fmts.append((_rng(r1, c1, r2, c2), f))
+
+        REG_COLS = 4   # Test | Device | Geo | Error detail
+
+        # Banner
+        r = row()
+        data.append(["REGRESSION STATUS"])
+        fmt(r, 1, r, REG_COLS, CellFormat(
+            backgroundColor=_c("header_dk"),
+            textFormat=TextFormat(bold=True, foregroundColor=_c("white"), fontSize=12),
+        ))
+
+        if regression.get("no_previous_run"):
+            r = row()
+            data.append(["First real run — no previous run to compare against."])
+            fmt(r, 1, r, REG_COLS, CellFormat(
+                backgroundColor=_c("header_md"),
+                textFormat=TextFormat(foregroundColor=_c("white")),
+            ))
+            ws.update("A1", data, value_input_option="USER_ENTERED")
+            if fmts:
+                format_cell_ranges(ws, fmts)
+            return
+
+        prev_ts = regression.get("previous_run_timestamp", "")
+        geo = regression.get("geo", "")
+        try:
+            from datetime import datetime as _dt
+            prev_ts = _dt.fromisoformat(prev_ts.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            pass
+
+        r = row()
+        data.append([f"Compared against: {prev_ts}   geo: {geo}"])
+        fmt(r, 1, r, REG_COLS, CellFormat(
+            backgroundColor=_c("header_md"),
+            textFormat=TextFormat(foregroundColor=_c("white"), fontSize=10),
+        ))
+
+        def _subsection(label: str, rows: List[dict], color_key: str, include_error: bool) -> None:
+            data.append([])
+            r = row()
+            data.append([f"{label}  ({len(rows)})"])
+            fmt(r, 1, r, REG_COLS, CellFormat(
+                backgroundColor=_c(color_key),
+                textFormat=TextFormat(bold=True),
+            ))
+
+            if not rows:
+                data.append(["—"])
+                return
+
+            r = row()
+            hdrs = ["Test", "Device", "Detail"] if include_error else ["Test", "Device"]
+            data.append(hdrs)
+            fmt(r, 1, r, len(hdrs), CellFormat(
+                textFormat=TextFormat(bold=True),
+                backgroundColor=_c("dash"),
+            ))
+
+            for entry in rows:
+                if include_error:
+                    data.append([
+                        _test_name_cell(entry.get("test_name", "")),
+                        entry.get("device", ""),
+                        entry.get("error_summary") or "",
+                    ])
+                else:
+                    data.append([
+                        _test_name_cell(entry.get("test_name", "")),
+                        entry.get("device", ""),
+                    ])
+
+        new_f = regression.get("new_failures", [])
+        known = regression.get("known_failures", [])
+        fixed = regression.get("fixed", [])
+
+        _subsection("NEW FAILURES",   new_f, "fail",  include_error=True)
+        _subsection("KNOWN FAILURES", known, "mixed", include_error=True)
+        _subsection("FIXED",          fixed, "pass",  include_error=False)
+
+        total_rows = row() - 1
+        fmt(1, 1, total_rows, REG_COLS, CellFormat(wrapStrategy="WRAP", verticalAlignment="TOP"))
+
+        ws.update("A1", data, value_input_option="USER_ENTERED")
+        if fmts:
+            format_cell_ranges(ws, fmts)
+        set_frozen(ws, rows=1, cols=0)
+
+        self._set_column_widths(ws, {0: 220, 1: 130, 2: 350})
+
     # ── Appendix tab ──────────────────────────────────────────────────────────
 
     def _write_appendix_tab(
@@ -873,11 +1049,13 @@ class SheetsWriter:
             if not desc and not cond and not outcomes:
                 fmt(r, 2, r, 4, CellFormat(backgroundColor=_c("skip")))
 
-        # Wrap all text
+        # Wrap all text, top-align
         total_rows = row() - 1
-        fmt(1, 1, total_rows, 4, CellFormat(wrapStrategy="WRAP"))
+        fmt(1, 1, total_rows, 4, CellFormat(wrapStrategy="WRAP", verticalAlignment="TOP"))
 
         ws.update("A1", data, value_input_option="USER_ENTERED")
         if fmts:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=HEADER_ROW, cols=1)
+
+        self._set_column_widths(ws, {0: 220, 1: 300, 2: 300, 3: 350})

@@ -1,3 +1,22 @@
+"""
+prebid: PbjsIdentityModulesTest
+
+What this test checks
+---------------------
+Validates that the expected Prebid identity modules are configured for the current geo,
+by reading pbjs.getConfig().userSync.userIds[].name and comparing to the expected set
+defined in the geo config for the detected locale.
+
+Test conditions
+---------------
+- window.pbjs must be present.
+- Geo is determined from the Locale cookie injected by the framework.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: all expected identity modules for the geo are present in pbjs userSync config.
+- FAILED: one or more expected identity modules are missing for the current geo.
+"""
 from core.base_test import BaseTest, TestResult, TestState
 from config.test_settings import get_geo_config
 from utils.geo_utils import detect_geo_from_cookies

@@ -1,36 +1,29 @@
 """
 prebid: PbjsDisplayBidderPresenceTest
 
-Checks display bidder presence by comparing:
-  - bidders actually seen in DISPLAY bidRequested events (global store)
-  - bidders expected from Supabase for the current context, excluding hero_player
+What this test checks
+---------------------
+Validates display bidder presence by comparing bidders actually seen in DISPLAY
+bidRequested events (window.__pbjsBidEventsDisplay) against bidders expected from
+Supabase for the current publisher/environment context. hero_player bidders are excluded.
 
-Key fix (UAT publisher mismatch)
--------------------------------
-This test MUST prefer the runner's explicit context (publisher/publication, env/environment)
-over URL-derived heuristics.
+Publisher and environment are read from the runner's explicit config
+(publisher/publication, environment/env) rather than derived from the URL, to avoid
+mismatches on UAT where URL heuristics return "independent" instead of "independent_uat".
 
-Example:
-  DB publisher: independent_uat
-  URL host: uat-web.independent.co.uk  -> URL heuristic would return "independent" (WRONG)
+Test conditions
+---------------
+- window.pbjs must be present (otherwise skipped).
+- Supabase must be configured (otherwise skipped).
+- DISPLAY bidRequested events must have been captured.
 
-So we read:
-  self.config["publisher"] or self.config["publication"]
-  self.config["environment"] or self.config["env"]
-
-PASS / FAIL / SKIP
-------------------
-SKIPPED:
-  - window.pbjs missing
-  - Supabase not configured
-
-FAILED:
-  - Supabase returns 0 rows for context *when explicit ctx is provided* (likely mismatch or missing DB)
-  - missing expected bidders (expected - seen)
-  - unexpected bidders (seen - expected)
-
-PASSED:
-  - missing == [] and unexpected == []
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: seen display bidders exactly match the expected set (no missing, no unexpected).
+- FAILED: Supabase returns 0 rows for the explicit context (configuration/mapping error).
+- FAILED: expected bidders are present in DB but missing from the observed auction.
+- FAILED: bidders observed in the auction that are not in the expected set.
+- SKIPPED: window.pbjs missing or Supabase not configured.
 """
 
 from typing import Any, Dict, List, Set
@@ -43,6 +36,7 @@ from core.url_context_helpers import (
     get_context_publisher,
     get_context_environment,
     has_explicit_ctx,
+    bidder_lookup_env,
 )
 
 class PbjsDisplayBidderPresenceTest(BaseTest):
@@ -216,10 +210,10 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
 
         # ✅ FIX: prefer explicit ctx from runner/config; fallback to URL heuristic only if missing
         publisher = get_context_publisher(self.config, result.url)
-        environment = get_context_environment(self.config, result.url)
+        environment = bidder_lookup_env(get_context_environment(self.config, result.url))
 
-        from core.device_helpers import device_label
-        device = device_label(self.config)
+        from core.device_helpers import device_label, bidder_lookup_device
+        device = bidder_lookup_device(device_label(self.config))
         geo = locale.lower()
 
         seen: Set[str] = set(diag.get("biddersFromRequests") or [])

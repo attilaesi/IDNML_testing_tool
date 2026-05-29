@@ -1,24 +1,28 @@
 # tests/layout_tests/taboola_load_time_test.py
 
 """
-taboola:load_time
+taboola: TaboolaLoadTimeTest
 
-A measurement probe — not a pass/fail test.
-
-Tracks three specific Taboola placements by their container ID:
+What this test checks
+---------------------
+Measurement probe for Taboola render timing — not a pass/fail correctness test.
+Tracks three specific placements by container ID:
   - taboola-mid-article-thumbnails-ii   (mid-article, hybrid)
   - taboola-carousel-thumbnails          (carousel, sponsored)
   - taboola-mid-article-thumbnails-iii  (second mid-article, hybrid)
 
-Each placement is considered "rendered" when Taboola has injected
-a .trc_rbox_container child into its anchor div — this element is
-absent before loader.js runs and only appears after Taboola renders.
+A placement is considered "rendered" when Taboola has injected a .trc_rbox_container
+child into its anchor div. Timings are measured as deltas from loader.js responseEnd
+(Resource Timing API) and relative to navigation start.
 
-Timings are deltas from loader.js responseEnd (from the Resource
-Timing API), both relative to navigation start.
+Test conditions
+---------------
+- Taboola loader.js must appear in the Resource Timing entries; otherwise skipped.
 
-SKIPPED : loader.js not found in Resource Timing (Taboola not active)
-PASSED  : always when loader present — reports timings as warnings
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: Taboola loader.js found; render timings reported as informational warnings.
+- SKIPPED: loader.js not found in Resource Timing (Taboola not active on this page).
 """
 
 from typing import Dict, Any

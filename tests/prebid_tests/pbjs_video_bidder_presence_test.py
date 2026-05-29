@@ -1,40 +1,29 @@
 """
 prebid: PbjsVideoBidderPresenceTest
 
-Runs ONLY on video pages.
+What this test checks
+---------------------
+Validates video bidder presence on hero_player by comparing bidders actually seen in
+VIDEO bidRequested events (window.__pbjsBidEventsVideo, filtered to hero_player bids)
+against bidders expected from Supabase for the current publisher/environment context.
 
-Checks video bidder presence by comparing:
-  - bidders actually seen bidding on hero_player in VIDEO bidRequested events
-  - bidders expected from Supabase for the current context, restricted to slot=hero_player
+"Seen video bidders" are derived only from req.bids[] where adUnitCode === "hero_player"
+or mediaTypes.video is present — bidderCode alone is not sufficient.
 
-Key fixes
----------
-1) Publisher/env must prefer explicit runner context (publisher/publication, env/environment)
-   because UAT uses distinct publisher keys (e.g. independent_uat) and URL heuristics return
-   "independent" which causes 0-row Supabase results + skips.
+Test conditions
+---------------
+- Page must be a video page (pageType == video); otherwise skipped.
+- window.pbjs must be present (otherwise skipped).
+- Supabase must be configured (otherwise skipped).
+- Publisher/env read from explicit runner config to avoid UAT URL-heuristic mismatches.
 
-2) Supabase "0 rows" behavior:
-   - If explicit ctx is provided -> FAIL (this is a configuration/mapping error we want to catch)
-   - Else -> SKIP (we can't assert)
-
-3) Keep the core correctness fix:
-   - derive "seen video bidders" ONLY from req.bids[] that match hero_player (or mediaTypes.video)
-   - do NOT treat req.bidderCode alone as sufficient unless at least one bid matches hero criteria
-
-PASS / FAIL / SKIP
-------------------
-SKIPPED:
-  - not a video page (pageType != video)
-  - pbjs missing
-  - Supabase not configured
-
-FAILED:
-  - Supabase returns 0 rows for context *when explicit ctx is provided*
-  - missing expected video bidders
-  - unexpected video bidders
-
-PASSED:
-  - sets match
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: seen video bidders exactly match the expected set for hero_player.
+- FAILED: Supabase returns 0 rows for the explicit context (configuration/mapping error).
+- FAILED: expected video bidders missing from the observed hero_player auction.
+- FAILED: video bidders observed that are not in the expected set.
+- SKIPPED: non-video page, pbjs missing, or Supabase not configured.
 """
 
 from typing import Any, Dict, List, Set
@@ -47,6 +36,7 @@ from core.url_context_helpers import (
     get_context_publisher,
     get_context_environment,
     has_explicit_ctx,
+    bidder_lookup_env,
 )
 
 class PbjsVideoBidderPresenceTest(VideoOnlyTest):
@@ -285,10 +275,10 @@ class PbjsVideoBidderPresenceTest(VideoOnlyTest):
 
         # ✅ FIX: prefer explicit ctx from runner/config; fallback to URL heuristic only if missing
         publisher = get_context_publisher(self.config, result.url)
-        environment = get_context_environment(self.config, result.url)
+        environment = bidder_lookup_env(get_context_environment(self.config, result.url))
 
-        from core.device_helpers import device_label
-        device = device_label(self.config)
+        from core.device_helpers import device_label, bidder_lookup_device
+        device = bidder_lookup_device(device_label(self.config))
         geo = locale.lower()
 
         # ✅ only bidders that actually bid on hero_player

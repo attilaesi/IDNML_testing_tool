@@ -38,3 +38,8 @@ def device_label(config: dict) -> str:
     if w >= _TABLET_MIN_WIDTH:
         return "tablet"
     return "mobile"
+
+
+def bidder_lookup_device(device: str) -> str:
+    """Tablets share the mobile bidder set — always query mobile rows."""
+    return "mobile" if device == "tablet" else device

@@ -1,7 +1,22 @@
 import asyncio
+import json
+import os
+import urllib.parse
 from typing import Optional
 
 from playwright.async_api import async_playwright
+
+# Maps Playwright device names → BrowserStack OS/browser capabilities.
+# iOS/iPad → WebKit on macOS (same engine as real iOS Safari).
+# Everything else → Chrome on Windows.
+_BS_CAPS_BY_DEVICE = {
+    "Desktop Chrome":         {"browser": "chrome",            "os": "Windows", "os_version": "11"},
+    "Desktop Edge":           {"browser": "edge",              "os": "Windows", "os_version": "11"},
+    "Desktop Firefox":        {"browser": "playwright-firefox", "os": "Windows", "os_version": "11"},
+    "Desktop Safari":         {"browser": "playwright-webkit", "os": "OS X",    "os_version": "Sonoma"},
+}
+_BS_WEBKIT_OS = {"os": "OS X", "os_version": "Sonoma"}
+_BS_CHROME_OS = {"os": "Windows", "os_version": "11"}
 
 
 class BrowserManager:
@@ -17,12 +32,6 @@ class BrowserManager:
         """Launch browser and create a single shared context."""
         self.playwright = await async_playwright().start()
 
-        browser_type = self.playwright.chromium
-        headless = bool(self.config.get("headless", True))
-        slow_mo = int(self.config.get("slow_mo", 0) or 0)
-
-        self.browser = await browser_type.launch(headless=headless, slow_mo=slow_mo)
-
         # Resolve device profile — sets viewport, UA, touch, is_mobile, etc.
         device_name = self.config.get("device_name")
         device_profile = self.playwright.devices.get(device_name, {}) if device_name else {}
@@ -30,6 +39,18 @@ class BrowserManager:
         # Store resolved viewport back into config so device_helpers can read it.
         if "viewport" in device_profile:
             self.config["viewport"] = device_profile["viewport"]
+
+        bs_user = os.getenv("BROWSERSTACK_USERNAME")
+        bs_key = os.getenv("BROWSERSTACK_ACCESS_KEY")
+        use_browserstack = self.config.get("browserstack_enabled") and bs_user and bs_key
+
+        if use_browserstack:
+            self.browser = await self._connect_browserstack(bs_user, bs_key, device_name)
+        else:
+            browser_type = self.playwright.chromium
+            headless = bool(self.config.get("headless", True))
+            slow_mo = int(self.config.get("slow_mo", 0) or 0)
+            self.browser = await browser_type.launch(headless=headless, slow_mo=slow_mo)
 
         # ---------------------------------------------------------------------
         # IMPORTANT: Basic auth for pre-prod MUST be done via Playwright
@@ -234,6 +255,46 @@ class BrowserManager:
             })();
             """
         )
+
+    async def _connect_browserstack(self, username: str, access_key: str, device_name: Optional[str]):
+        """Connect to BrowserStack's Playwright cloud instead of launching locally."""
+        is_ios = device_name and any(x in device_name for x in ("iPhone", "iPad"))
+        is_firefox = device_name and "Firefox" in device_name
+
+        if is_ios:
+            browser_type = self.playwright.webkit
+            browser_cap = "playwright-webkit"
+            os_caps = _BS_WEBKIT_OS
+        elif is_firefox:
+            browser_type = self.playwright.firefox
+            browser_cap = "playwright-firefox"
+            os_caps = _BS_CHROME_OS
+        else:
+            browser_type = self.playwright.chromium
+            full_caps = _BS_CAPS_BY_DEVICE.get(device_name or "")
+            if full_caps:
+                browser_cap = full_caps["browser"]
+                os_caps = {k: v for k, v in full_caps.items() if k != "browser"}
+            else:
+                browser_cap = "chrome"
+                os_caps = _BS_CHROME_OS
+
+        caps = {
+            "browser": browser_cap,
+            "browser_version": "latest",
+            **os_caps,
+            "name": self.config.get("bs_session_name", "IDNML Ad Test"),
+            "build": self.config.get("bs_build_name", "IDNML"),
+            "browserstack.username": username,
+            "browserstack.accessKey": access_key,
+        }
+
+        cdp_url = (
+            f"wss://cdp.browserstack.com/playwright"
+            f"?caps={urllib.parse.quote(json.dumps(caps))}"
+        )
+        print(f"[BrowserStack] Connecting — device: {device_name or 'default'}, browser: {browser_cap}, os: {os_caps}")
+        return await browser_type.connect(cdp_url)
 
     async def new_page(self):
         """Create a new page in the shared context."""

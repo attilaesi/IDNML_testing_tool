@@ -1,21 +1,23 @@
 """
 environment: EnvIsMobileOrTabletTest
 
-Runs first on every URL, regardless of site plan.
+What this test checks
+---------------------
+Verifies that the site sets the `is_mobile_or_tablet` cookie to the correct value
+for the viewport in use. Runs on every URL regardless of site plan.
 
-Checks that the site sets the `is_mobile_or_tablet` cookie to the correct value
-for the viewport we are running at:
-  - Portrait viewport (width < height)  → expected value: "true"
-  - Landscape viewport (width >= height) → expected value: "false"
+Test conditions
+---------------
+- No conditions; test always runs.
+- Expected value depends on viewport orientation:
+    - Portrait (width < height)  → expected "true"
+    - Landscape (width >= height) → expected "false"
 
-PASS / FAIL
------------
-PASSED:
-  - cookie is present and matches expected value
-
-FAILED:
-  - cookie is absent
-  - cookie value does not match expected ("true" / "false")
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: cookie is present and its value matches the expected value for the viewport.
+- FAILED: cookie `is_mobile_or_tablet` is absent.
+- FAILED: cookie value does not match expected ("true" or "false" for the viewport).
 """
 
 from core.base_test import BaseTest, TestResult, TestState

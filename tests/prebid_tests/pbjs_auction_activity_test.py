@@ -1,3 +1,25 @@
+"""
+prebid: PbjsAuctionActivityTest
+
+What this test checks
+---------------------
+Verifies that a Prebid auction has actually fired and produced observable bid data.
+Primary source: window.__pbjsBidEventsDisplay (bidResponse events from global event hook).
+Fallback: pbjs.getBidResponsesForAdUnitCode() and pbjs.getAllWinningBids().
+
+Test conditions
+---------------
+- window.pbjs must be present.
+- At least one bidRequest or bidResponse event must be observable.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: at least one bid response recorded across any ad unit.
+- PASSED (with warning): bidRequested events seen but bidResponse data unavailable
+  (Prebid build has responses stripped); Prebid is running.
+- FAILED: no bid responses and no bidRequested events observed at all.
+- NOTE: absence of winning bids is a warning only, not a failure.
+"""
 # tests/prebid_tests/pbjs_auction_activity_test.py
 
 from core.base_test import BaseTest, TestResult, TestState

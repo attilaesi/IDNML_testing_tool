@@ -1,3 +1,27 @@
+"""
+prebid: PbjsPriceFloorsVideoTest
+
+What this test checks
+---------------------
+Validates that Prebid price floors are configured and active for VIDEO auctions.
+Uses window.__pbjsBidEventsVideo (populated by BrowserManager) to confirm video
+activity occurred, then checks the priceFloors module and rule configuration.
+
+Test conditions
+---------------
+- Page must be a video page (pageType == video); otherwise skipped.
+- window.__pbjsBidEventsVideo must contain bidRequested events.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: priceFloors module installed (or config present), enabled, floor rules exist,
+  and at least one video-applicable rule is configured.
+- FAILED: priceFloors module not installed and no floors config present.
+- FAILED: floors config present but disabled.
+- FAILED: floors config enabled but no rules configured.
+- FAILED: no video-applicable floor rules found.
+- SKIPPED: no video Prebid activity observed (non-video page or no events captured).
+"""
 # tests/prebid_tests/pbjs_prebid_price_floors_video_test.py
 
 from typing import Any, Dict, List

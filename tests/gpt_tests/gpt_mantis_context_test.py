@@ -5,23 +5,20 @@ gpt:mantis_context
 
 What this test is meant to test
 -------------------------------
-Checks GPT targeting key "mantis_context" for basic shape/health:
-non-empty list of strings when present. We no longer try to enforce
-a particular whitelist; the main goal is to ensure the key isn't
-present but completely empty.
+Checks that the GPT targeting key "mantis_context" is present and contains
+at least one non-empty string value.
 
 Test conditions
 ---------------
 - googletag.pubads() must be present.
-- If "mantis_context" exists, its values should be non-empty strings.
 
 What counts as PASS / FAIL / SKIPPED
 ------------------------------------
 - PASSED:
-    - "mantis_context" not present, OR
-    - present with at least one non-empty string value.
+    - "mantis_context" is present with at least one non-empty string value.
 - FAILED:
-    - present but all values are empty/whitespace.
+    - "mantis_context" key is missing from GPT targeting.
+    - "mantis_context" is present but all values are empty/whitespace.
 - SKIPPED:
     - GPT targeting not available.
 """
@@ -43,25 +40,35 @@ class GptMantisContextTest(GptBaseTest):
             if (!window.googletag || !googletag.pubads) return null;
             const pubads = googletag.pubads();
             if (!pubads || !pubads.getTargeting) return null;
-            return pubads.getTargeting("mantis_context") || [];
+            const keys = pubads.getTargetingKeys ? pubads.getTargetingKeys() : [];
+            const present = keys.includes("mantis_context");
+            return {
+              present,
+              values: present ? (pubads.getTargeting("mantis_context") || []) : [],
+            };
           } catch (e) {
             return null;
           }
         }
         """
-        vals = await page.evaluate(js)
-        result.data = {"mantis_context": vals or []}
+        raw = await page.evaluate(js)
+        result.data = raw or {}
         return result
 
     async def validate(self, result: TestResult) -> TestResult:
-        vals: List[str] = [
-            str(v).strip() for v in (result.data or {}).get("mantis_context", [])
-        ]
+        raw = result.data or {}
 
-        if not vals:
-            result.state = TestState.PASSED
+        if not raw:
+            result.state = TestState.SKIPPED
+            result.errors.append("GPT targeting not available.")
             return result
 
+        if not raw.get("present"):
+            result.state = TestState.FAILED
+            result.errors.append("mantis_context key not found in GPT targeting.")
+            return result
+
+        vals: List[str] = [str(v).strip() for v in raw.get("values") or []]
         non_empty = [v for v in vals if v]
         if non_empty:
             result.state = TestState.PASSED

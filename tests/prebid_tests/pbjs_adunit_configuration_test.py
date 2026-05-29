@@ -1,3 +1,26 @@
+"""
+prebid: PbjsAdUnitConfigurationTest
+
+What this test checks
+---------------------
+Validates the Prebid ad unit configuration present in window.pbjs.adUnits:
+  - At least one ad unit is defined.
+  - Each ad unit has a code / adUnitCode.
+  - Each ad unit has at least one bidder configured.
+  - Each ad unit has sizes configured.
+
+Test conditions
+---------------
+- window.pbjs must be present and pbjs.adUnits must be an array.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: all ad units have a code, at least one bidder, and sizes defined.
+- FAILED: pbjs.adUnits is missing or empty.
+- FAILED: one or more ad units are missing code / adUnitCode.
+- FAILED: one or more ad units have no bidders configured.
+- NOTE: missing sizes is reported as a warning only, not a failure.
+"""
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
 

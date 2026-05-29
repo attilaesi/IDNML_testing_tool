@@ -1,3 +1,24 @@
+"""
+prebid: PbjsVideoPubcidPresenceTest
+
+What this test checks
+---------------------
+Validates that PubCommonId (pubcid) is present in every video bidder's hero_player requests.
+Inspects bids in window.__pbjsBidEventsVideo filtered to hero_player (adUnitCode === "hero_player"
+or mediaTypes.video present), checking userId.pubCommonId or a matching userIdAsEids entry.
+
+Test conditions
+---------------
+- Page must be a video page (pageType == video); otherwise skipped.
+- VIDEO hero_player bidRequested events must have been captured.
+
+What counts as PASS / FAIL / SKIP
+-----------------------------------
+- PASSED: every video hero_player bidder has pubcid in at least one of its bids.
+- FAILED: pbjs present but no VIDEO hero_player bidRequested bids captured.
+- FAILED: at least one video bidder is missing pubcid across all of its bids.
+- SKIPPED: window.pbjs not present on the page.
+"""
 from core.base_test import VideoOnlyTest, TestResult, TestState
 
 class PbjsVideoPubcidPresenceTest(VideoOnlyTest):
