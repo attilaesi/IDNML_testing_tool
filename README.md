@@ -10,6 +10,9 @@ A modular, async Playwright-based framework for validating ad implementations ac
 pip install -r requirements.txt
 playwright install chromium
 
+# Source environment variables (credentials, etc.)
+set -a && source env.local && set +a
+
 # Run all tests against the active site profile
 python -m tasks.run_tests
 
@@ -18,6 +21,12 @@ python -m tasks.run_tests --test pbjs_display_bidder_presence_test
 
 # Override the site profile
 python -m tasks.run_tests --site independent_uat
+
+# Upload results to Supabase + include regression diff in the sheet
+python -m tasks.run_tests --real_run
+
+# Run via BrowserStack Automate (requires Automate plan + credentials in env.local)
+python -m tasks.run_tests --browserstack
 ```
 
 ---
@@ -26,25 +35,31 @@ python -m tasks.run_tests --site independent_uat
 
 ```
 config/
-  base_config.py        — Master config: site, device, timeouts, feature flags
-  device_config.py      — Playwright device profile selector (ACTIVE_DEVICE)
+  base_config.py        — Master config: site, device, timeouts, feature flags, BrowserStack
+  device_config.py      — Playwright device profile selector (ACTIVE_DEVICE + DEVICE_SUITE)
   site_urls.py          — URL sets per site profile
   site_test_plans.py    — Per-publisher test exclusion rules
 
 core/
   framework_manager.py  — Main orchestrator: crawl, run tests, output matrix
-  browser_manager.py    — Playwright context creation (device profile, auth, Prebid hooks)
+  browser_manager.py    — Browser launch / BrowserStack connect, context, Prebid hooks
   base_test.py          — BaseTest / TestResult / TestState base classes
   device_helpers.py     — Viewport-based device type detection (mobile vs desktop)
   cmp_handler.py        — Consent banner dismissal
   readiness_waiter.py   — Wait for Prebid + GPT to be ready on page
+  data_extractor.py     — Shared JS extraction helpers used across tests
   supabase_helpers.py   — Supabase credential resolution for bidder config queries
+  supabase_writer.py    — Writes run results to Supabase for regression tracking
+  sheets_writer.py      — Creates timestamped Google Spreadsheet after each run
   url_context_helpers.py— Publisher/env/page-type detection from URL
+  framework/
+    discovery.py        — Auto-discovers test classes from the tests/ directory
 
 tasks/
-  run_tests.py          — CLI entry point: discover and run all ad tests
+  run_tests.py          — CLI entry point: discover and run all ad tests (single device)
+  run_multi_device.py   — Run all tests across the four-device suite
   run_crawler.py        — Sitemap-based URL crawler entry point
-  common.py             — Shared output/summary helpers
+  common.py             — Shared output/summary helpers (banner, print_results)
 
 tests/
   environment_tests/    — Site environment integrity checks
@@ -133,17 +148,17 @@ self.light_ad_rules = None   # leave unset (page default)
 | `pbjs_hero_player_placement_test` | Hero player ad unit configured correctly |
 | `pbjs_price_floors_display_test` | Price floors set for display |
 | `pbjs_price_floors_video_test` | Price floors set for video |
-| `pbjs_pubcid_presence_display_test` | PubCID module active for display |
-| `pbjs_pubcid_presence_video_test` | PubCID module active for video |
+| `pbjs_display_pubcid_presence_test` | PubCID module active for display |
+| `pbjs_video_pubcid_presence_test` | PubCID module active for video |
 | `pbjs_auction_activity_test` | Auction fired and received bids |
 | `pbjs_adunit_configuration_test` | Ad unit config is valid |
 | `pbjs_consent_integration_test` | Prebid consent integration |
 | `pbjs_identity_modules_test` | Identity modules loaded |
 | `pbjs_mantis_signals_bid_test` | Mantis signals passed into bids |
 | `pbjs_permutive_signals_bid_test` | Permutive signals passed into bids |
-| `pbjs_timeout_config_test` | Bid timeout configured correctly |
-| `pbjs_warnings_test` | No unexpected Prebid warnings |
-| `pbjs_environment_test` | Prebid version and environment checks |
+| `pbjs_prebid_timeout_config_test` | Bid timeout configured correctly |
+| `pbjs_prebid_warnings_test` | No unexpected Prebid warnings |
+| `pbjs_prebid_environment_test` | Prebid version and environment checks |
 
 ### Layout tests
 | Test | What it checks |
@@ -155,91 +170,9 @@ self.light_ad_rules = None   # leave unset (page default)
 
 ## Output
 
-- **Terminal matrix** — pass/fail grid (tests × URLs) printed after each run, with ANSI colour coding
-- **CSV** — `output/output.csv` (per test × URL), `output/output_by_pagetype.csv` (aggregated by page type)
-- **Text report** — `output/` directory
-
----
-
-## Site Test Plans
-
-`config/site_test_plans.py` maps each publisher to a set of test exclusion rules:
-- `exclude` — tests never run on this publisher
-- `exclude_by_page_type` — tests excluded for specific page types (e.g. video, article)
-
-Tests in the `ENVIRONMENT` category are always exempt from site plan exclusions.
-
----
-
-## Google Sheets Output
-
-After each run, the framework can create a new timestamped Google Spreadsheet containing colour-coded results. The spreadsheet URL is printed at the end of the run and the sheet is shared directly to your Google account.
-
-### Sheet layout
-
-| Tab | Contents |
-|---|---|
-| **Summary** | Run header · per-device pass-rate table · cross-device comparison matrix with clickable hyperlinks from FAIL/MIXED cells to the exact row in the relevant device tab |
-| **desktop** | Test × URL matrix · failure details · URL key |
-| **mobile_ios** | Same layout |
-| **mobile_android** | Same layout |
-| **tablet** | Same layout |
-
-Colour key: green = PASS · red = FAIL · dark red = ERROR · amber = MIXED · grey = SKIP/SKIP
-
-### Google Cloud setup (one-time)
-
-**1. Create a Google Cloud project**
-- Go to [console.cloud.google.com](https://console.cloud.google.com)
-- Create a new project (or select an existing one)
-
-**2. Enable APIs**
-- In the project, go to **APIs & Services → Library**
-- Search for and enable **Google Sheets API**
-- Search for and enable **Google Drive API**
-
-**3. Create a service account**
-- Go to **APIs & Services → Credentials → Create Credentials → Service Account**
-- Give it a name (e.g. `ad-testing-bot`)
-- No roles are needed at the project level — click through to finish
-- On the service account detail page, go to **Keys → Add Key → Create new key → JSON**
-- Download the JSON file and store it somewhere safe (e.g. `~/.config/ad-testing-sa.json`)
-
-**4. Configure the env var**
-
-```bash
-# Add to your shell profile (~/.zshrc or ~/.bash_profile):
-export GOOGLE_SERVICE_ACCOUNT_JSON="/path/to/your/service-account-key.json"
-
-# Or, for CI pipelines, set it to the JSON content directly:
-export GOOGLE_SERVICE_ACCOUNT_JSON='{"type":"service_account", ...}'
-```
-
-**5. Enable Sheets output in config**
-
-```python
-# config/base_config.py
-self.sheets_config = {
-    "sheets_enabled": True,
-    "sheets_share_email": "you@independent.co.uk",  # your Google account
-}
-```
-
-Or set `SHEETS_SHARE_EMAIL` as an env var instead.
-
-When the run completes, the new spreadsheet is created in the service account's Drive and shared with your email — it will appear in **"Shared with me"** in Google Drive.
-
-### Running with Sheets output
-
-```bash
-# Single-device run
-python -m tasks.run_tests
-
-# Multi-device run
-python -m tasks.run_multi_device
-```
-
-Both runners check `sheets_enabled` and write a sheet if it is `True`. Each run creates a new spreadsheet (nothing is overwritten).
+- **Terminal** — pass/fail counts, per-URL breakdown, failure details with error messages, and a run banner clearly showing whether you're running locally or via BrowserStack
+- **Google Sheets** — timestamped spreadsheet created after every run (see below)
+- **Supabase** — results uploaded for week-over-week regression tracking when `--real_run` is passed
 
 ---
 
@@ -276,6 +209,12 @@ python -m tasks.run_multi_device --devices desktop,mobile_ios
 
 # Run a specific test across all devices
 python -m tasks.run_multi_device --test pbjs_display_bidder_presence_test
+
+# Upload results + regression diff
+python -m tasks.run_multi_device --real_run
+
+# Run via BrowserStack
+python -m tasks.run_multi_device --browserstack
 ```
 
 ### Output format
@@ -294,13 +233,6 @@ python -m tasks.run_multi_device --test pbjs_display_bidder_presence_test
 -----------------------------------------------------------------
 ```
 
-Cell values:
-- `PASS` — all URLs passed on that device
-- `FAIL (N/M)` — N out of M URLs failed or errored
-- `SKIP` — all URLs skipped
-- `MIXED` — mix of pass and skip (no failures)
-- `-` — no results recorded
-
 ### Parallel device mode
 
 By default, devices run **sequentially** for clean, readable log output. To run all four devices concurrently (faster, but logs interleave), add to `base_config.py`:
@@ -309,19 +241,134 @@ By default, devices run **sequentially** for clean, readable log output. To run 
 self.test_config["parallel_devices"] = True
 ```
 
-### CSV output
+---
 
-Multi-device runs write to separate files so single-device runs are not overwritten:
-- `output/output_multi_device.csv`
-- `output/output_by_pagetype_multi_device.csv`
+## Google Sheets Output
+
+After each run, the framework creates a new timestamped Google Spreadsheet with colour-coded results. The URL is printed at the end of the run and the sheet is shared to your configured Google account.
+
+### Sheet layout
+
+| Tab | Contents |
+|---|---|
+| **test_run_summary** | Run header · per-device pass-rate table · cross-device comparison matrix with clickable hyperlinks from FAIL/MIXED cells to the relevant device tab |
+| **desktop** | Test × URL matrix · failure details · URL key |
+| **mobile_ios** | Same layout |
+| **mobile_android** | Same layout |
+| **tablet** | Same layout |
+| **appendix** | Description, conditions, and pass/fail criteria for every test (from module docstrings) |
+
+Colour key: green = PASS · red = FAIL · dark red = ERROR · amber = MIXED · grey = SKIP
+
+### Authentication (OAuth — recommended)
+
+Sheets auth uses your personal Google account via OAuth. On first run it opens a browser to authenticate; after that it runs fully headlessly using a cached refresh token.
+
+**One-time setup:**
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create or select a project
+2. Enable **Google Sheets API** and **Google Drive API** under APIs & Services → Library
+3. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**
+   - Application type: **Desktop app**
+   - Download the JSON file and save it as `~/.config/adunit-oauth-client.json`
+4. Under **OAuth consent screen**, set publishing status to **Production** (prevents the refresh token expiring every 7 days)
+5. Configure in `base_config.py`:
+
+```python
+self.sheets_config = {
+    "sheets_enabled": True,
+    "sheets_share_email": "you@independent.co.uk",
+    "sheets_drive_folder_id": "your-drive-folder-id",
+    "sheets_oauth_credentials": "~/.config/adunit-oauth-client.json",
+}
+```
+
+Run any test task — a browser window will open for the first-time Google sign-in. Subsequent runs are fully headless.
+
+---
+
+## BrowserStack Automate
+
+The framework can run against BrowserStack's cloud browsers instead of local Playwright, giving you real browser engines, session video recordings, network waterfalls, and console logs for every page.
+
+> **Requires a BrowserStack Automate plan.** Live-only plans will not work.
+
+### Setup
+
+Add your BrowserStack credentials to `env.local`:
+
+```
+BROWSERSTACK_USERNAME="your_username"
+BROWSERSTACK_ACCESS_KEY="your_access_key"
+```
+
+Find both values by clicking the key icon (🔑) in the BrowserStack Automate dashboard.
+
+Source the file before running:
+
+```bash
+set -a && source env.local && set +a
+```
+
+### Running
+
+```bash
+# Single device
+python -m tasks.run_tests --browserstack
+
+# All four devices
+python -m tasks.run_multi_device --browserstack
+```
+
+### Device mapping
+
+| Playwright profile | BrowserStack target |
+|---|---|
+| `Desktop Chrome` | Chrome (latest) on Windows 11 |
+| `Desktop Edge` | Edge (latest) on Windows 11 |
+| `Desktop Firefox` | Firefox (latest) on Windows 11 |
+| `Desktop Safari` | WebKit on macOS Sonoma |
+| `iPhone *` / `iPad *` | WebKit on macOS Sonoma (same engine as iOS Safari) |
+| `Pixel 7` / other Android | Chrome (latest) on Windows 11 |
+
+Playwright's device profile (viewport, user agent, touch) is applied on top of the BrowserStack session — so mobile emulation behaves identically to a local run, but executes on BrowserStack infrastructure with full session recording.
+
+### Viewing results
+
+After a run, go to **BrowserStack Automate → Build Runs** → click the **IDNML** build → click any session. Each session has:
+
+- **Video** — full recording of the browser from page load to close
+- **Network** — request waterfall (filter by domain to find pbjs/GPT calls)
+- **Console** — every `console.log/warn/error` the page emitted
+- **Logs** — Playwright command log
+
+---
+
+## Supabase / Regression Tracking
+
+Pass `--real_run` to any task to upload results to Supabase and include a week-over-week regression diff in the Google Sheet.
+
+```bash
+python -m tasks.run_tests --real_run
+python -m tasks.run_multi_device --real_run
+```
+
+Supabase credentials are read from `env.local`:
+
+```
+NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
+```
 
 ---
 
 ## Architecture Notes
 
+- **Browser targeting** — `BrowserManager` checks for `browserstack_enabled` in config and connects to BrowserStack via CDP (`browser_type.connect()`) if set; otherwise launches Chromium locally. All context creation, Prebid hooks, and test logic are identical in both modes.
 - **Device detection** — Playwright's built-in device profiles set viewport, UA, touch, and `is_mobile`. `core/device_helpers.py` derives `mobile`/`desktop` from viewport aspect ratio (portrait = mobile).
-- **Prebid event capture** — A `context.add_init_script` hook fires before every page script and attaches `pbjs.onEvent` listeners, splitting events into `display` and `video` streams (`__pbjsBidEventsDisplay` / `__pbjsBidEventsVideo`).
+- **Prebid event capture** — A `context.add_init_script` hook fires before every page script and attaches `pbjs.onEvent` listeners, splitting events into `display` and `video` streams (`window.__pbjsBidEventsDisplay` / `window.__pbjsBidEventsVideo`).
 - **Basic auth** — Pre-prod credentials are passed via Playwright `http_credentials`, not via URL injection (which breaks `History.replaceState` and `fetch` on some pages).
 - **CMP** — Consent is handled once per session on the first URL; subsequent pages inherit the accepted consent from the shared browser context.
 - **Warmup** — Configurable warmup phase loads N pages before testing starts to prime the browser context and consent state.
 - **Parallel mode** — URLs can be tested in parallel using a bounded semaphore (`concurrency` in config). Each parallel worker gets its own page within the shared browser context.
+- **Test discovery** — `core/framework/discovery.py` auto-discovers all `BaseTest` subclasses from the `tests/` directory. No registration required; adding a new file is enough.
