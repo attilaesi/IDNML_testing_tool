@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ad Inspector</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-title">Ad Inspector</div>
+      <div class="tab-url" id="tab-url" title="">—</div>
+    </div>
+
+    <div class="controls">
+      <button id="run-btn" class="run-btn">Run Tests</button>
+      <span id="spinner" class="spinner" style="display:none"></span>
+    </div>
+
+    <div id="error-msg" class="error-msg" style="display:none"></div>
+
+    <div id="summary" class="summary" style="display:none"></div>
+
+    <div id="results" class="results" style="display:none"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

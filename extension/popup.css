@@ -1,0 +1,222 @@
+/* Ad Inspector popup styles */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 420px;
+  min-width: 420px;
+  max-width: 420px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 12px;
+  color: #1a1a2e;
+  background: #f8f9fb;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  max-height: 600px;
+}
+
+/* ---- Header ---- */
+.header {
+  background: #1a1a2e;
+  color: #ffffff;
+  padding: 10px 14px 8px;
+  flex-shrink: 0;
+}
+
+.header-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  margin-bottom: 3px;
+}
+
+.tab-url {
+  font-size: 10px;
+  color: #a0aec0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 390px;
+}
+
+/* ---- Controls ---- */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+  background: #ffffff;
+}
+
+.run-btn {
+  background: #2b6cb0;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.run-btn:hover:not(:disabled) {
+  background: #2c5282;
+}
+
+.run-btn:disabled {
+  background: #90cdf4;
+  cursor: not-allowed;
+}
+
+/* ---- Spinner ---- */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #bee3f8;
+  border-top-color: #2b6cb0;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Error ---- */
+.error-msg {
+  background: #fff5f5;
+  color: #c53030;
+  border-left: 3px solid #c53030;
+  padding: 8px 12px;
+  font-size: 11px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* ---- Summary bar ---- */
+.summary {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.summary-pass {
+  background: #f0fff4;
+  color: #276749;
+}
+
+.summary-fail {
+  background: #fff5f5;
+  color: #c53030;
+}
+
+/* ---- Results area ---- */
+.results {
+  overflow-y: auto;
+  flex: 1;
+  padding: 0 0 8px;
+  background: #f8f9fb;
+}
+
+/* ---- Category header ---- */
+.category-header {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #1a1a2e;
+  background: #edf2f7;
+  padding: 5px 14px 4px;
+  border-bottom: 1px solid #cbd5e0;
+  border-top: 1px solid #cbd5e0;
+  margin-top: 4px;
+}
+
+.category-header:first-child {
+  margin-top: 0;
+}
+
+/* ---- Test row ---- */
+.test-row {
+  padding: 5px 14px;
+  border-bottom: 1px solid #edf2f7;
+  background: #ffffff;
+}
+
+.test-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.test-name {
+  font-size: 11px;
+  color: #2d3748;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Badges ---- */
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+
+.badge-pass {
+  background: #c6f6d5;
+  color: #22543d;
+}
+
+.badge-fail {
+  background: #fed7d7;
+  color: #c53030;
+}
+
+.badge-skip {
+  background: #e2e8f0;
+  color: #718096;
+}
+
+.badge-info {
+  background: #bee3f8;
+  color: #2a4365;
+}
+
+/* ---- Detail text (error messages) ---- */
+.test-detail {
+  font-size: 10px;
+  color: #c53030;
+  margin-top: 3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  padding-left: 2px;
+  border-left: 2px solid #fed7d7;
+  padding-left: 6px;
+}
+
+/* badge-info details are not errors */
+.test-row:has(.badge-info) .test-detail {
+  color: #2c5282;
+  border-left-color: #bee3f8;
+}
