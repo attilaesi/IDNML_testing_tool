@@ -17,9 +17,12 @@ What counts as PASS / FAIL / SKIP
 - PASSED: all expected identity modules for the geo are present in pbjs userSync config.
 - FAILED: one or more expected identity modules are missing for the current geo.
 """
+from pathlib import Path
 from core.base_test import BaseTest, TestResult, TestState
 from config.test_settings import get_geo_config
 from utils.geo_utils import detect_geo_from_cookies
+
+_JS = (Path(__file__).parent.parent / "js" / "pbjs_identity_modules.js").read_text()
 
 class PbjsIdentityModulesTest(BaseTest):
 
@@ -57,28 +60,7 @@ class PbjsIdentityModulesTest(BaseTest):
         expected_ids = set(geo_cfg.get("identity_modules", []))
 
         # 2) Extract identity modules from pbjs config
-        data = await page.evaluate(
-            """
-            () => {
-              const out = {
-                userIds: [],
-                userSync: null
-              };
-
-              if (!window.pbjs || !window.pbjs.getConfig) {
-                return out;
-              }
-
-              const cfg = window.pbjs.getConfig() || {};
-              const us = cfg.userSync || {};
-              const ids = Array.isArray(us.userIds) ? us.userIds : [];
-
-              out.userIds = ids.map(u => u && u.name).filter(Boolean);
-              out.userSync = us;
-              return out;
-            }
-            """
-        )
+        data = await page.evaluate(_JS)
 
         actual_ids = set(data.get("userIds") or [])
         missing = sorted(expected_ids - actual_ids)

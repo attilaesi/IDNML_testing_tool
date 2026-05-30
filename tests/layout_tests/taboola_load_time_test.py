@@ -25,8 +25,11 @@ What counts as PASS / FAIL / SKIP
 - SKIPPED: loader.js not found in Resource Timing (Taboola not active on this page).
 """
 
+from pathlib import Path
 from typing import Dict, Any
 from core.base_test import BaseTest, TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "taboola_load_time.js").read_text()
 
 
 PLACEMENTS = [
@@ -59,71 +62,9 @@ class TaboolaLoadTimeTest(BaseTest):
         # Build a JS array of [key, containerId] pairs to pass in
         placement_pairs = [[key, cid] for key, cid in PLACEMENTS]
 
-        js = """
-        ([loaderUrl, timeoutMs, placements]) => new Promise(function(resolve) {
-            const resources = performance.getEntriesByType("resource");
-
-            const loaderEntry = resources.find(function(e) {
-                return e.name.indexOf(loaderUrl) !== -1;
-            });
-            if (!loaderEntry) {
-                return resolve({ loaderPresent: false });
-            }
-
-            const tScriptStart = loaderEntry.startTime;
-            const tScript = loaderEntry.responseEnd;
-
-            // A placement is "rendered" when Taboola has injected
-            // .trc_rbox_container inside the anchor div.
-            function isRendered(containerId) {
-                const el = document.getElementById(containerId);
-                if (!el) return false;
-                return !!el.querySelector(".trc_rbox_container");
-            }
-
-            // Track timing per placement: null = not yet found
-            const times = {};
-            placements.forEach(function(p) { times[p[0]] = null; });
-
-            const startedAt = performance.now();
-
-            const interval = setInterval(function() {
-                const elapsed = performance.now() - startedAt;
-
-                placements.forEach(function(p) {
-                    const key = p[0], cid = p[1];
-                    if (times[key] === null && isRendered(cid)) {
-                        times[key] = Math.round(performance.now());
-                    }
-                });
-
-                const allFound = placements.every(function(p) { return times[p[0]] !== null; });
-                if (!allFound && elapsed < timeoutMs) return;
-
-                clearInterval(interval);
-
-                const deltas = {};
-                placements.forEach(function(p) {
-                    const key = p[0];
-                    deltas[key] = times[key] !== null
-                        ? Math.round(times[key] - tScript)
-                        : null;
-                });
-
-                resolve({
-                    loaderPresent:   true,
-                    tScriptStart:    Math.round(tScriptStart),
-                    tScript:         Math.round(tScript),
-                    deltas:          deltas,
-                    timedOutAfterMs: Math.round(elapsed),
-                });
-            }, 200);
-        })
-        """
-
         loader_url = self.config.get("taboola_loader_url", "")
         page.set_default_timeout(timeout_ms + 5000)
-        data = await page.evaluate(js, [loader_url, timeout_ms, placement_pairs])
+        data = await page.evaluate(_JS, [loader_url, timeout_ms, placement_pairs])
         result.data = data or {}
         return result
 

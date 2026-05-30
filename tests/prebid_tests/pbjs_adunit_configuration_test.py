@@ -21,8 +21,11 @@ What counts as PASS / FAIL / SKIP
 - FAILED: one or more ad units have no bidders configured.
 - NOTE: missing sizes is reported as a warning only, not a failure.
 """
+from pathlib import Path
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
+
+_JS = (Path(__file__).parent.parent / "js" / "pbjs_adunit_configuration.js").read_text()
 
 class PbjsAdUnitConfigurationTest(BaseTest):
 
@@ -68,47 +71,7 @@ class PbjsAdUnitConfigurationTest(BaseTest):
             basic_data = await DataExtractor.extract_basic_data(page, url)
             result.data.update(basic_data)
 
-            ad_unit_data = await page.evaluate(
-                """
-                () => {
-                    const out = {
-                        ad_units: [],
-                        errors: []
-                    };
-
-                    try {
-                        const pbjs = window.pbjs;
-                        if (!pbjs || !Array.isArray(pbjs.adUnits)) {
-                            out.errors.push("pbjs.adUnits is not an array");
-                            return out;
-                        }
-
-                        out.ad_units = pbjs.adUnits.map((unit) => {
-                            const bids = Array.isArray(unit.bids) ? unit.bids : [];
-                            const bidderCodes = bids
-                                .map(b => b && b.bidder)
-                                .filter(Boolean);
-
-                            const sizes =
-                                unit.sizes
-                                || (unit.mediaTypes && unit.mediaTypes.banner && unit.mediaTypes.banner.sizes)
-                                || [];
-
-                            return {
-                                code: unit.code || unit.adUnitCode || null,
-                                bidders: bidderCodes,
-                                sizes: sizes,
-                                mediaTypes: unit.mediaTypes || {},
-                            };
-                        });
-                    } catch (e) {
-                        out.errors.push(String(e));
-                    }
-
-                    return out;
-                }
-                """
-            )
+            ad_unit_data = await page.evaluate(_JS)
 
             result.data["prebid_ad_units"] = ad_unit_data
 

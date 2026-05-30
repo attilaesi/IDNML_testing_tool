@@ -25,9 +25,12 @@ What counts as PASS / FAIL / SKIPPED
     - googletag.pubads() targeting cannot be read.
 """
 
+from pathlib import Path
 from typing import Dict, Any, List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_autorefresh.js").read_text()
 
 class GptAutorefreshTest(GptBaseTest):
 
@@ -37,19 +40,7 @@ class GptAutorefreshTest(GptBaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        js = """
-        () => {
-          try {
-            if (!window.googletag || !googletag.pubads) return null;
-            const pubads = googletag.pubads();
-            if (!pubads || !pubads.getTargeting) return null;
-            return pubads.getTargeting("autorefresh") || [];
-          } catch (e) {
-            return null;
-          }
-        }
-        """
-        vals = await page.evaluate(js)
+        vals = await page.evaluate(_JS)
         result.data = {"autorefresh": vals or []}
         return result
 

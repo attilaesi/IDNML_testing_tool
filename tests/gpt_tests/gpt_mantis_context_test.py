@@ -23,9 +23,12 @@ What counts as PASS / FAIL / SKIPPED
     - GPT targeting not available.
 """
 
+from pathlib import Path
 from typing import List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_mantis_context.js").read_text()
 
 class GptMantisContextTest(GptBaseTest):
 
@@ -34,24 +37,7 @@ class GptMantisContextTest(GptBaseTest):
     async def execute(self, page, url: str) -> TestResult:
         result = TestResult(self.name)
         result.url = url
-        js = """
-        () => {
-          try {
-            if (!window.googletag || !googletag.pubads) return null;
-            const pubads = googletag.pubads();
-            if (!pubads || !pubads.getTargeting) return null;
-            const keys = pubads.getTargetingKeys ? pubads.getTargetingKeys() : [];
-            const present = keys.includes("mantis_context");
-            return {
-              present,
-              values: present ? (pubads.getTargeting("mantis_context") || []) : [],
-            };
-          } catch (e) {
-            return null;
-          }
-        }
-        """
-        raw = await page.evaluate(js)
+        raw = await page.evaluate(_JS)
         result.data = raw or {}
         return result
 

@@ -1,6 +1,9 @@
 import asyncio
+from pathlib import Path
 from typing import Dict, Any
 from utils.helpers import flatten_value
+
+_JS_BASIC = (Path(__file__).parent.parent / "tests" / "js" / "shared" / "data_extractor_basic.js").read_text()
 
 class DataExtractor:
     """Common data extraction functionality from original script"""
@@ -30,43 +33,7 @@ class DataExtractor:
         try:
 
             
-            js_result = await page.evaluate(
-                """
-                () => {
-                    const out = {
-                        paragraphs: 0,
-                        images: 0,
-                        ad_slots: 0,
-                        slots: [],
-                        targeting: {}
-                    };
-                    
-                    try { 
-                        out.paragraphs = document.querySelectorAll('#main p').length; 
-                    } catch {}
-                    
-                    try { 
-                        out.images = document.querySelectorAll('#main img').length; 
-                    } catch {}
-                    
-                    try {
-                        const pub = googletag.pubads();
-                        ['category1','category2','pageType','liveblog'].forEach(k => {
-                            const v = pub.getTargeting(k);
-                            if (v?.length) out.targeting[k] = v;
-                        });
-                        
-                        const slots = pub.getSlots();
-                        out.ad_slots = slots.length;
-                        out.slots = slots.map(s => s.getAdUnitPath().split('/').pop());
-                    } catch (e) {
-                        // googletag not available or no slots
-                    }
-                    
-                    return out;
-                }
-                """
-            )
+            js_result = await page.evaluate(_JS_BASIC)
             
             # Map results using original logic
             result["paragraphs"] = js_result["paragraphs"]

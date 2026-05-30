@@ -28,9 +28,12 @@ What counts as PASS / FAIL / SKIPPED
       (index/homepage).
 """
 
+from pathlib import Path
 from typing import Dict, Any, List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_category2.js").read_text()
 
 class GptCategory2Test(GptBaseTest):
 
@@ -40,24 +43,7 @@ class GptCategory2Test(GptBaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        js = """
-        () => {
-          try {
-            if (!window.googletag || !googletag.pubads) return null;
-            const pubads = googletag.pubads();
-            if (!pubads || !pubads.getTargeting) return null;
-
-            return {
-              pageType: pubads.getTargeting("pageType") || [],
-              category1: pubads.getTargeting("category1") || [],
-              category2: pubads.getTargeting("category2") || []
-            };
-          } catch (e) {
-            return null;
-          }
-        }
-        """
-        payload = await page.evaluate(js)
+        payload = await page.evaluate(_JS)
         result.data = payload or {"pageType": [], "category1": [], "category2": []}
         return result
 

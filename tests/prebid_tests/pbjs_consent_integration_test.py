@@ -47,9 +47,12 @@ We don’t enforce WHICH namespaces must exist (that depends on geo),
 only that any namespace which *does* exist is correctly wired to a CMP.
 """
 
+from pathlib import Path
 from typing import Any, Dict
 
 from core.base_test import BaseTest, TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "pbjs_consent_integration.js").read_text()
 
 class PbjsConsentIntegrationTest(BaseTest):
 
@@ -85,42 +88,7 @@ class PbjsConsentIntegrationTest(BaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        js = """
-        () => {
-          const w = window;
-          const out = {
-            hasPbjs: !!w.pbjs,
-            hasGetConfig: false,
-            consentManagement: null,
-            gdpr: null,
-            usp: null,
-            gpp: null,
-            error: null
-          };
-
-          if (!w.pbjs || typeof w.pbjs.getConfig !== "function") {
-            out.hasGetConfig = !!(w.pbjs && typeof w.pbjs.getConfig === "function");
-            return out;
-          }
-
-          out.hasGetConfig = true;
-
-          try {
-            const cfg = w.pbjs.getConfig() || {};
-            const cm = cfg.consentManagement || {};
-            out.consentManagement = cm || null;
-            out.gdpr = cm.gdpr || null;
-            out.usp  = cm.usp  || null;
-            out.gpp  = cm.gpp  || null;
-          } catch (e) {
-            out.error = String(e && e.message ? e.message : e);
-          }
-
-          return out;
-        }
-        """
-
-        diag = await page.evaluate(js)
+        diag = await page.evaluate(_JS)
         result.data = diag or {}
 
         if self.config.get("trace"):

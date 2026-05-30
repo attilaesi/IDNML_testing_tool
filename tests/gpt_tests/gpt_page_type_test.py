@@ -23,9 +23,12 @@ What counts as PASS / FAIL / SKIPPED
     - GPT targeting not available.
 """
 
+from pathlib import Path
 from typing import List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_page_type.js").read_text()
 
 class GptPageTypeTest(GptBaseTest):
 
@@ -34,19 +37,7 @@ class GptPageTypeTest(GptBaseTest):
     async def execute(self, page, url: str) -> TestResult:
         result = TestResult(self.name)
         result.url = url
-        js = """
-        () => {
-          try {
-            if (!window.googletag || !googletag.pubads) return null;
-            const pubads = googletag.pubads();
-            if (!pubads || !pubads.getTargeting) return null;
-            return pubads.getTargeting("pageType") || [];
-          } catch (e) {
-            return null;
-          }
-        }
-        """
-        vals = await page.evaluate(js)
+        vals = await page.evaluate(_JS)
         result.data = {"pageType": vals or []}
         return result
 

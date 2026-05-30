@@ -20,8 +20,11 @@ What counts as PASS / FAIL / SKIP
 - FAILED: cookie value does not match expected ("true" or "false" for the viewport).
 """
 
+from pathlib import Path
 from core.base_test import BaseTest, TestResult, TestState
 from core.device_helpers import is_mobile_viewport
+
+_JS = (Path(__file__).parent.parent / "js" / "env_is_mobile_or_tablet.js").read_text()
 
 
 class EnvIsMobileOrTabletTest(BaseTest):
@@ -39,26 +42,7 @@ class EnvIsMobileOrTabletTest(BaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        js = """
-        () => {
-          try {
-            const cookies = document.cookie ? document.cookie.split(/;\\s*/) : [];
-            for (const c of cookies) {
-              const idx = c.indexOf("=");
-              if (idx === -1) continue;
-              const name = c.slice(0, idx).trim();
-              if (name === "is_mobile_or_tablet") {
-                return c.slice(idx + 1).trim() || null;
-              }
-            }
-            return null;
-          } catch (e) {
-            return null;
-          }
-        }
-        """
-
-        cookie_value = await page.evaluate(js)
+        cookie_value = await page.evaluate(_JS)
         result.data = {"cookie_value": cookie_value}
         return result
 

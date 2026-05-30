@@ -25,8 +25,11 @@ What counts as PASS / FAIL / SKIPPED
     - GPT targeting not available.
 """
 
+from pathlib import Path
 from typing import Dict, Any
 from core.base_test import BaseTest, TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_referrer.js").read_text()
 
 class GptReferrerTest(BaseTest):
 
@@ -38,26 +41,7 @@ class GptReferrerTest(BaseTest):
     async def execute(self, page, url: str) -> TestResult:
         result = TestResult(self.name)
         result.url = url
-        js = """
-        () => {
-          const out = { gptReferrer: null, docReferrer: null, hasGpt: false };
-          try {
-            out.docReferrer = document.referrer || "";
-          } catch (e) {}
-          try {
-            if (window.googletag && googletag.pubads) {
-              const pubads = googletag.pubads();
-              if (pubads && pubads.getTargeting) {
-                out.hasGpt = true;
-                const vals = pubads.getTargeting("referrer") || [];
-                if (vals.length) out.gptReferrer = String(vals[0] || "");
-              }
-            }
-          } catch (e) {}
-          return out;
-        }
-        """
-        diag = await page.evaluate(js)
+        diag = await page.evaluate(_JS)
         result.data = diag or {"gptReferrer": None, "docReferrer": "", "hasGpt": False}
         return result
 

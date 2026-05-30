@@ -20,8 +20,11 @@ What counts as PASS / FAIL / SKIPPED
     - If googletag.pubads() is not available.
 """
 
+from pathlib import Path
 from typing import Dict, Any, List
 from core.base_test import BaseTest, TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_slot_dump_probe.js").read_text()
 
 class GptSlotDumpProbeTest(BaseTest):
 
@@ -35,31 +38,7 @@ class GptSlotDumpProbeTest(BaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        js = """
-        () => {
-          try {
-            if (!window.googletag || !googletag.pubads) return null;
-            const pubads = googletag.pubads();
-            if (!pubads || !pubads.getSlots) return null;
-            const slots = pubads.getSlots() || [];
-            const out = [];
-            slots.forEach(s => {
-              const id = s.getSlotElementId && s.getSlotElementId();
-              const adUnit = s.getAdUnitPath && s.getAdUnitPath();
-              const keys = s.getTargetingKeys ? s.getTargetingKeys() : [];
-              const kv = {};
-              keys.forEach(k => {
-                kv[k] = s.getTargeting(k) || [];
-              });
-              out.push({ id, adUnit, targeting: kv });
-            });
-            return out;
-          } catch (e) {
-            return null;
-          }
-        }
-        """
-        slots = await page.evaluate(js)
+        slots = await page.evaluate(_JS)
         if slots is None:
             result.state = TestState.SKIPPED
             result.warnings.append("GPT slots not available; skipping GptSlotDumpProbeTest.")

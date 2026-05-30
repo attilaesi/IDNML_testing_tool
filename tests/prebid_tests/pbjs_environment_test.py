@@ -19,8 +19,11 @@ What counts as PASS / FAIL / SKIP
 - FAILED: pbjs.que not initialised as an array.
 - FAILED: pbjs.installedModules is empty (no modules loaded).
 """
+from pathlib import Path
 from core.base_test import BaseTest, TestResult, TestState
 from core.data_extractor import DataExtractor
+
+_JS = (Path(__file__).parent.parent / "js" / "pbjs_environment.js").read_text()
 
 class PbjsPrebidEnvironmentTest(BaseTest):
 
@@ -68,39 +71,7 @@ class PbjsPrebidEnvironmentTest(BaseTest):
             result.data.update(basic_data)
 
             # Snapshot of Prebid presence and modules
-            prebid_env = await page.evaluate(
-                """
-                () => {
-                    const out = {
-                        pbjs_loaded: false,
-                        queue_ready: false,
-                        version: null,
-                        installed_modules: [],
-                        errors: []
-                    };
-
-                    try {
-                        const pbjs = window.pbjs;
-
-                        if (!pbjs) {
-                            return out;
-                        }
-
-                        out.pbjs_loaded = true;
-                        out.queue_ready = Array.isArray(pbjs.que);
-                        out.version = pbjs.version || null;
-
-                        if (Array.isArray(pbjs.installedModules)) {
-                            out.installed_modules = pbjs.installedModules.slice();
-                        }
-                    } catch (e) {
-                        out.errors.push(String(e));
-                    }
-
-                    return out;
-                }
-                """
-            )
+            prebid_env = await page.evaluate(_JS)
 
             result.data["prebid_env"] = prebid_env
 

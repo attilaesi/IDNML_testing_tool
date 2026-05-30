@@ -29,9 +29,12 @@ What counts as PASS / FAIL / SKIPPED
     - pageType is clearly non-article (e.g. "index", "homepage").
 """
 
+from pathlib import Path
 from typing import Dict, Any, List
 from core.gpt_base_test import GptBaseTest
 from core.base_test import TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_article_id.js").read_text()
 
 class GptArticleIdTest(GptBaseTest):
 
@@ -43,25 +46,7 @@ class GptArticleIdTest(GptBaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        js = """
-        () => {
-          try {
-            if (!window.googletag || !googletag.pubads) return null;
-            const pubads = googletag.pubads();
-            if (!pubads || !pubads.getTargetingKeys) return null;
-
-            const out = {};
-            const keys = pubads.getTargetingKeys() || [];
-            keys.forEach(k => {
-              out[k] = pubads.getTargeting(k) || [];
-            });
-            return out;
-          } catch (e) {
-            return null;
-          }
-        }
-        """
-        targeting = await page.evaluate(js)
+        targeting = await page.evaluate(_JS)
         result.data = targeting or {}
         return result
 

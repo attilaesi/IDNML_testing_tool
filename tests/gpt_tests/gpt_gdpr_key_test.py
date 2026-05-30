@@ -32,9 +32,12 @@ What counts as PASS / FAIL / SKIPPED
     - GPT targeting is not available at all.
 """
 
+from pathlib import Path
 from typing import Dict, Any, List
 
 from core.base_test import BaseTest, TestResult, TestState
+
+_JS = (Path(__file__).parent.parent / "js" / "gpt_gdpr_key.js").read_text()
 
 class GptGdprKeyTest(BaseTest):
 
@@ -51,44 +54,7 @@ class GptGdprKeyTest(BaseTest):
         locale = getattr(self, "locale", "UK")
         result.metadata["locale"] = locale
 
-        js = """
-        () => {
-          const out = {
-            hasGpt: false,
-            gdprValues: [],
-            errors: []
-          };
-
-          try {
-            const g = window.googletag;
-            if (!g || !g.pubads || typeof g.pubads !== "function") {
-              out.errors.push("googletag.pubads() not available");
-              return out;
-            }
-            const pubads = g.pubads();
-            if (!pubads || typeof pubads.getTargeting !== "function") {
-              out.errors.push("pubads.getTargeting() not available");
-              return out;
-            }
-            out.hasGpt = true;
-
-            try {
-              const vals = pubads.getTargeting("gdpr") || [];
-              if (Array.isArray(vals)) {
-                out.gdprValues = vals.map(v => String(v));
-              }
-            } catch (e) {
-              out.errors.push("Error reading gdpr targeting: " + String(e));
-            }
-          } catch (e) {
-            out.errors.push(String(e));
-          }
-
-          return out;
-        }
-        """
-
-        diag = await page.evaluate(js)
+        diag = await page.evaluate(_JS)
         if not isinstance(diag, dict):
             diag = {}
 
