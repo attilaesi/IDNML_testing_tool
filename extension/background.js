@@ -16,7 +16,6 @@ const TEST_FILES = [
   "js/pbjs_pubcid_presence_display.js",
   "js/pbjs_pubcid_presence_video.js",
   "js/pbjs_timeout_config.js",
-  "js/pbjs_warnings_init.js",
   "js/pbjs_hero_player_placement.js",
   "js/pbjs_mantis_signals_bid.js",
   "js/pbjs_permutive_signals_bid.js",

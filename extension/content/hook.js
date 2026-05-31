@@ -147,6 +147,46 @@
       }, 250);
     }
 
+    // ----------------------------------------------------------------
+    // Console hook — captures Prebid log messages for warnings test.
+    // Runs at document_start so we catch messages from the page's own
+    // auction without triggering a second requestBids() call.
+    // ----------------------------------------------------------------
+    window.__prebidWarningLogs = window.__prebidWarningLogs || [];
+
+    if (!window.__prebidWarningsHooked) {
+      window.__prebidWarningsHooked = true;
+
+      const safeStr = (v) => {
+        try {
+          if (v == null) return String(v);
+          if (typeof v === "string") return v;
+          if (typeof v === "number" || typeof v === "boolean") return String(v);
+          if (v instanceof Error) return v.stack || v.message || String(v);
+          try { return JSON.stringify(v); } catch (_) { return String(v); }
+        } catch (_) { return "[unserializable]"; }
+      };
+
+      ["log", "warn", "error", "info", "debug"].forEach((level) => {
+        try {
+          const orig = console[level];
+          if (typeof orig !== "function") return;
+          console[level] = function () {
+            try {
+              const text = Array.prototype.slice.call(arguments).map(safeStr).join(" ");
+              if (text.indexOf("Prebid") !== -1) {
+                window.__prebidWarningLogs.push({ level, text, ts: Date.now() });
+                if (window.__prebidWarningLogs.length > 3000) {
+                  window.__prebidWarningLogs.splice(0, window.__prebidWarningLogs.length - 3000);
+                }
+              }
+            } catch (_) {}
+            return orig.apply(console, arguments);
+          };
+        } catch (_) {}
+      });
+    }
+
   } catch (e) {
     // ignore top-level errors
   }
