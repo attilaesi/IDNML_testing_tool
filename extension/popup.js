@@ -17,7 +17,6 @@ const CATEGORIES = {
     "pbjs_pubcid_presence_display",
     "pbjs_pubcid_presence_video",
     "pbjs_timeout_config",
-    "pbjs_warnings",
     "pbjs_hero_player_placement",
     "pbjs_mantis_signals_bid",
     "pbjs_permutive_signals_bid",
@@ -604,24 +603,6 @@ function runAllTests() {
     try { results[name] = (typeof fn === "function") ? fn() : { _error: "not a function" }; }
     catch (e) { results[name] = { _error: String(e) }; }
   }
-  try {
-    const logs = Array.isArray(window.__prebidWarningLogs) ? window.__prebidWarningLogs : [];
-    const FAIL_PATTERN = "invalid bid sent to bidder";
-    const failing = logs.filter(m => (m.text || "").toLowerCase().includes(FAIL_PATTERN)).slice(0, 50);
-    const byBidder = {}, adslotsByBidder = {};
-    for (const msg of failing) {
-      const line = msg.text || "";
-      const ll = line.toLowerCase();
-      const idx = ll.indexOf(FAIL_PATTERN);
-      const tok = idx === -1 ? "unknown" : ((line.slice(idx + FAIL_PATTERN.length) || "").trim().split(":")[0].split(" ")[0].trim().replace(/[^a-zA-Z0-9_-]/g, "") || "unknown");
-      byBidder[tok] = (byBidder[tok] || 0) + 1;
-      const slots = [];
-      const re = /"adslot"\s*:\s*"([^"]+)"/gi; let m;
-      while ((m = re.exec(line)) !== null) { if (!slots.includes(m[1])) slots.push(m[1]); }
-      if (slots.length) { adslotsByBidder[tok] = adslotsByBidder[tok] || []; for (const s of slots) if (!adslotsByBidder[tok].includes(s)) adslotsByBidder[tok].push(s); }
-    }
-    results["pbjs_warnings"] = { prebidMessagesTotal: logs.length, matchedCount: failing.length, matchedByBidder: byBidder, invalidBidAdslotsByBidder: adslotsByBidder, init: { hasPbjs: !!window.pbjs } };
-  } catch (e) { results["pbjs_warnings"] = { _error: String(e) }; }
   return results;
 }
 

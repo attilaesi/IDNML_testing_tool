@@ -84,60 +84,6 @@ function runAllTests() {
     }
   }
 
-  // Warnings: the init file is an IIFE that populates window.__prebidWarningLogs.
-  // Collect and parse that store here.
-  try {
-    const logs = Array.isArray(window.__prebidWarningLogs) ? window.__prebidWarningLogs : [];
-    const FAIL_PATTERN = "invalid bid sent to bidder";
-    const failing = logs.filter(m => (m.text || "").toLowerCase().includes(FAIL_PATTERN)).slice(0, 50);
-    const byBidder = {};
-    const adslotsByBidder = {};
-
-    const extractBidder = (line) => {
-      try {
-        const ll = line.toLowerCase();
-        const idx = ll.indexOf(FAIL_PATTERN);
-        if (idx === -1) return "unknown";
-        const after = (line.slice(idx + FAIL_PATTERN.length) || "").trim();
-        const tok = after.split(":")[0].split(" ")[0].trim();
-        return tok.replace(/[^a-zA-Z0-9_-]/g, "") || "unknown";
-      } catch (e) { return "unknown"; }
-    };
-
-    const extractAdslots = (line) => {
-      const slots = [];
-      const adslotRe = /"adslot"\s*:\s*"([^"]+)"/gi;
-      let m;
-      while ((m = adslotRe.exec(line)) !== null) {
-        const s = m[1].trim();
-        if (s && !slots.includes(s)) slots.push(s);
-      }
-      return slots;
-    };
-
-    for (const msg of failing) {
-      const bidder = extractBidder(msg.text || "");
-      byBidder[bidder] = (byBidder[bidder] || 0) + 1;
-      const slots = extractAdslots(msg.text || "");
-      if (slots.length) {
-        adslotsByBidder[bidder] = adslotsByBidder[bidder] || [];
-        for (const s of slots) {
-          if (!adslotsByBidder[bidder].includes(s)) adslotsByBidder[bidder].push(s);
-        }
-      }
-    }
-
-    results["pbjs_warnings"] = {
-      prebidMessagesTotal: logs.length,
-      matchedCount: failing.length,
-      matchedByBidder: byBidder,
-      invalidBidAdslotsByBidder: adslotsByBidder,
-      init: { hasPbjs: !!window.pbjs },
-    };
-  } catch (e) {
-    results["pbjs_warnings"] = { _error: String(e) };
-  }
-
   return results;
 }
 
