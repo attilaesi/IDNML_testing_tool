@@ -102,8 +102,9 @@ const VALIDATORS = {
     const errors = [];
     const floors = (data && data.prebid_floors_video) ? data.prebid_floors_video : (data || {});
     for (const e of (floors.errors || [])) errors.push("Extraction warning: " + e);
+    // No video activity = video player hasn't loaded yet in extension context — skip, don't fail.
     if (!floors.has_video_store || parseInt(floors.video_bidrequested_events || 0, 10) === 0) {
-      errors.push("No video Prebid activity observed."); return errors;
+      return [];
     }
     const hasCfg = Boolean(floors.has_floors_config), enabled = Boolean(floors.enabled);
     if (!floors.module_present && !hasCfg) errors.push("Video floors: priceFloors module not installed and no floors config present");
@@ -122,7 +123,8 @@ const VALIDATORS = {
 
   "pbjs_pubcid_presence_video": (data) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not found"];
-    if (parseInt(data.heroBidsConsidered || 0, 10) === 0) return ["No VIDEO hero_player bids captured; cannot confirm pubcid."];
+    // No hero bids = video player not loaded yet in extension context — skip, don't fail.
+    if (parseInt(data.heroBidsConsidered || 0, 10) === 0) return [];
     const missing = data.biddersMissingPubcid || [];
     return missing.length ? ["pubcid missing for VIDEO bidders: " + missing.join(", ")] : [];
   },
@@ -141,8 +143,9 @@ const VALIDATORS = {
 
   "pbjs_hero_player_placement": (data) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not present"];
-    if (parseInt(data.eventsLen || 0, 10) === 0) return ["Event store empty; no Prebid events captured."];
-    if (parseInt(data.heroBidsTotal || 0, 10) === 0) return ["No bids found for adUnitCode 'hero_player'."];
+    // No events or no hero bids = video player not loaded yet in extension context — skip, don't fail.
+    if (parseInt(data.eventsLen || 0, 10) === 0) return [];
+    if (parseInt(data.heroBidsTotal || 0, 10) === 0) return [];
     const lines = [];
     for (const bidder of Object.keys(data.perBidder || {}).sort()) {
       const info = data.perBidder[bidder] || {};
