@@ -39,7 +39,7 @@ REPLACEMENTS = {
 }
 
 # Files in tests/js/ to skip (shared/ handled separately; others not needed)
-SKIP_FILES = {"taboola_load_time.js", "layout_ad_sequence.js"}
+SKIP_FILES = {"taboola_load_time.js"}
 
 
 def sync():
