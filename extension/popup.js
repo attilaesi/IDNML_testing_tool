@@ -626,7 +626,7 @@ function hideStates() {
   }
 }
 
-function renderResults(results, runAt) {
+function renderResults(results, runAt, tabId) {
   hideStates();
   const resultsEl = document.getElementById("results");
   const summaryEl = document.getElementById("summary");
@@ -704,6 +704,12 @@ function renderResults(results, runAt) {
     document.getElementById("run-at").textContent = "Run at " + runAt;
     footerEl.style.display = "flex";
   }
+
+  // Update badge with the accurate validator-based fail count
+  if (tabId != null) {
+    chrome.action.setBadgeText({ tabId, text: totalFail > 0 ? String(totalFail) : "✓" });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: totalFail > 0 ? "#c53030" : "#276749" });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -753,7 +759,7 @@ async function triggerRerun(tabId) {
     const results = injection?.result ?? {};
     const runAt = new Date().toLocaleTimeString();
     await chrome.storage.local.set({ [storageKey]: { url, status: "done", results, timestamp: Date.now(), runAt } });
-    renderResults(results, runAt);
+    renderResults(results, runAt, tabId);
   } catch (e) {
     showState("state-error");
     document.getElementById("state-error").textContent = "Run failed: " + e.message;
@@ -817,7 +823,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (entry.status === "done") {
-      renderResults(entry.results, entry.runAt);
+      renderResults(entry.results, entry.runAt, tab.id);
     }
   };
 
