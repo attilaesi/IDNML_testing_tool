@@ -24,7 +24,30 @@ const CATEGORIES = {
   ],
   "GPT": [
     "gpt_page_type",
+    "gpt_mantis",
     "gpt_mantis_context",
+    "gpt_permutive_composite",
+    "gpt_article_id",
+    "gpt_category1",
+    "gpt_category2",
+    "gpt_autorefresh",
+    "gpt_cmp_active",
+    "gpt_commercial",
+    "gpt_consent_tcf",
+    "gpt_content_sources",
+    "gpt_gam_bid_keys",
+    "gpt_gdpr_key",
+    "gpt_liveblog",
+    "gpt_longread",
+    "gpt_referrer",
+    "gpt_reg_gate",
+    "gpt_testgroup",
+    "gpt_topictags",
+    "gpt_anonymised_key",
+    "gpt_untested_keys",
+  ],
+  "LAYOUT": [
+    "layout_ad_sequence",
   ],
   "ENVIRONMENT": [
     "env_is_mobile_or_tablet",
@@ -355,6 +378,177 @@ const VALIDATORS = {
     return errors;
   },
 
+  "gpt_anonymised_key": (data) => {
+    if (!data || !data.hasGpt) return [];
+    if (data.error) return ["Error reading anonymised targeting: " + data.error];
+    if (!data.keyUsed || !(data.values || []).length)
+      return ["No anonymised targeting found (keys tried: AnonymisedSignalLift, anonymised)."];
+    return [];
+  },
+
+  "gpt_article_id": (data) => {
+    if (!data) return [];
+    const pageType = ((data.pageType || [])[0] || "").toLowerCase().trim();
+    if (pageType === "index" || pageType === "homepage") return [];
+    const CANDIDATE_KEYS = ["article", "articleid", "article_id", "content_id"];
+    const normalized = {};
+    for (const [k, v] of Object.entries(data)) normalized[k.toLowerCase()] = (v || []).map(String);
+    let foundValid = false;
+    const emptyKeys = [];
+    for (const cand of CANDIDATE_KEYS) {
+      if (!(cand in normalized)) continue;
+      const good = normalized[cand].filter(v => v && !["null","none","undefined"].includes(v.toLowerCase()));
+      if (good.length) { foundValid = true; break; }
+      emptyKeys.push(cand);
+    }
+    if (!foundValid) return ["No valid article ID targeting found. Empty/invalid: " + (emptyKeys.join(", ") || "none of the candidate keys present")];
+    return [];
+  },
+
+  "gpt_autorefresh": (data) => {
+    const vals = ((data || {}).autorefresh || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    const bad = vals.filter(v => !["yes","no"].includes(v.toLowerCase()));
+    return bad.length ? ["Invalid autorefresh values (expected yes/no): " + bad.join(", ")] : [];
+  },
+
+  "gpt_category1": (data) => {
+    if (!data) return [];
+    const pageType = ((data.pageType || [])[0] || "").toLowerCase().trim();
+    if (pageType === "index" || pageType === "homepage") return [];
+    const vals = (data.category1 || []).map(v => String(v).trim()).filter(v => v);
+    return vals.length ? [] : ["category1 targeting missing or empty on article-like page."];
+  },
+
+  "gpt_category2": (data) => {
+    if (!data) return [];
+    const pageType = ((data.pageType || [])[0] || "").toLowerCase().trim();
+    if (pageType === "index" || pageType === "homepage") return [];
+    const cat1 = (data.category1 || []).map(v => String(v).trim()).filter(v => v);
+    const cat2 = (data.category2 || []).map(v => String(v).trim()).filter(v => v);
+    if (!cat2.length && cat1.length) return [];
+    return cat2.length ? [] : ["category2 targeting empty/invalid for article-like page."];
+  },
+
+  "gpt_cmp_active": (data) => {
+    const vals = ((data || {}).cmpActive || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    const bad = vals.filter(v => !["true","false"].includes(v.toLowerCase()));
+    return bad.length ? ["Invalid cmpActive values (expected true/false): " + bad.join(", ")] : [];
+  },
+
+  "gpt_commercial": (data) => {
+    const vals = ((data || {}).commercial || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    const bad = vals.filter(v => !["y","n"].includes(v.toLowerCase()));
+    return bad.length ? ["Invalid commercial values (expected y/n): " + bad.join(", ")] : [];
+  },
+
+  "gpt_consent_tcf": (data) => {
+    if (!data || !data.hasGpt) return [];
+    if (!data.gdprKey && !data.tcString)
+      return ["For UK locale, neither a gdpr GPT targeting key nor euconsent-v2 TCString was found."];
+    return [];
+  },
+
+  "gpt_content_sources": (data) => {
+    const vals = ((data || {}).contentSources || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    return vals.filter(v => v).length ? [] : ["contentSources present but all values are empty."];
+  },
+
+  "gpt_gam_bid_keys": (data) => {
+    if (!data) return [];
+    if (data.error) return ["JS error: " + data.error];
+    if (!data.hasGpt) return [];
+    if (!data.auctionEndCount) return [];
+    const errors = [];
+    if (!data.hasPrebid) errors.push("No hb_* keys in GAM targeting; Prebid did not enrich GAM.");
+    if (!data.hasTam)    errors.push("No amzn* keys in GAM targeting; TAM did not enrich GAM.");
+    return errors;
+  },
+
+  "gpt_gdpr_key": (data) => {
+    if (!data || !data.hasGpt) return [];
+    const vals = (data.gdprValues || []).map(v => String(v).trim());
+    if (!vals.length) return ["gdpr targeting key missing."];
+    const valid = vals.filter(v => v === "0" || v === "1");
+    return valid.length ? [] : ["Invalid gdpr value(s) (expected 0 or 1): " + vals.join(", ")];
+  },
+
+  "gpt_liveblog": (data) => {
+    const vals = ((data || {}).liveblog || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    const bad = vals.filter(v => !["y","n"].includes(v.toLowerCase()));
+    return bad.length ? ["Invalid liveblog values (expected y/n): " + bad.join(", ")] : [];
+  },
+
+  "gpt_longread": (data) => {
+    const vals = ((data || {}).longread || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    const bad = vals.filter(v => !["y","n"].includes(v.toLowerCase()));
+    return bad.length ? ["Invalid longread values (expected y/n): " + bad.join(", ")] : [];
+  },
+
+  "gpt_mantis": (data) => {
+    const vals = ((data || {}).mantis || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    return vals.filter(v => v).length ? [] : ["mantis targeting present but all values empty."];
+  },
+
+  "gpt_permutive_composite": (data) => {
+    const vals = ((data || {}).permutive || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    return vals.filter(v => v).length ? [] : ["permutive targeting present but all values empty."];
+  },
+
+  "gpt_referrer": (data) => {
+    if (!data || !data.hasGpt) return [];
+    const gptRef = (data.gptReferrer || "").trim();
+    const docRef = (data.docReferrer || "").trim();
+    if (!gptRef || !docRef) return [];
+    if (gptRef.includes(docRef) || docRef.includes(gptRef)) return [];
+    return ["GPT referrer '" + gptRef + "' does not match document.referrer '" + docRef + "'."];
+  },
+
+  "gpt_reg_gate": (data) => {
+    const vals = ((data || {}).reg_gate || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    return vals.filter(v => v).length ? [] : ["reg_gate targeting present but empty."];
+  },
+
+  "gpt_testgroup": (data) => {
+    const vals = ((data || {}).testgroup || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    return vals.filter(v => v).length ? [] : ["testgroup targeting present but empty."];
+  },
+
+  "gpt_topictags": (data) => {
+    const vals = ((data || {}).topictags || []).map(v => String(v).trim());
+    if (!vals.length) return [];
+    return vals.filter(v => v).length ? [] : ["topictags targeting present but all empty."];
+  },
+
+  "gpt_untested_keys": (data) => {
+    const KNOWN_KEYS = new Set(["pageType","article","articleId","article_id","content_id",
+      "category1","category2","commercial","liveblog","longread","reg_gate","testgroup",
+      "topictags","mantis","mantis_context","gdpr","autorefresh","cmpActive","contentSources",
+      "referrer","permutive","AnonymisedSignalLift"]);
+    const keys = (data || {}).keys || [];
+    if (!keys.length) return [];
+    const untested = keys.filter(k => !KNOWN_KEYS.has(k));
+    return untested.length ? ["Unknown GPT keys (not covered by any test): " + untested.sort().join(", ")] : [];
+  },
+
+  "layout_ad_sequence": (data) => {
+    if (!data) return [];
+    if (data.error) return ["JS error: " + data.error];
+    if (data.skipped) return [];
+    const failures = (data.rows || []).filter(r => (r.status || "").startsWith("FAIL"));
+    if (!failures.length) return [];
+    return failures.map(r => r.slot + ": " + r.status + (r.reason ? " — " + r.reason : ""));
+  },
+
 };
 
 // ---------------------------------------------------------------------------
@@ -378,7 +572,28 @@ const TEST_FILES = [
   "js/pbjs_mantis_signals_bid.js",
   "js/pbjs_permutive_signals_bid.js",
   "js/gpt_page_type.js",
+  "js/gpt_mantis.js",
   "js/gpt_mantis_context.js",
+  "js/gpt_permutive_composite.js",
+  "js/gpt_article_id.js",
+  "js/gpt_category1.js",
+  "js/gpt_category2.js",
+  "js/gpt_autorefresh.js",
+  "js/gpt_cmp_active.js",
+  "js/gpt_commercial.js",
+  "js/gpt_consent_tcf.js",
+  "js/gpt_content_sources.js",
+  "js/gpt_gam_bid_keys.js",
+  "js/gpt_gdpr_key.js",
+  "js/gpt_liveblog.js",
+  "js/gpt_longread.js",
+  "js/gpt_referrer.js",
+  "js/gpt_reg_gate.js",
+  "js/gpt_testgroup.js",
+  "js/gpt_topictags.js",
+  "js/gpt_anonymised_key.js",
+  "js/gpt_untested_keys.js",
+  "js/layout_ad_sequence.js",
   "js/env_is_mobile_or_tablet.js",
 ];
 
