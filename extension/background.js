@@ -193,3 +193,15 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.local.remove(`tab_${tabId}`);
 });
+
+// When popup writes the validated failCount back to storage, update the badge.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  for (const [key, { newValue }] of Object.entries(changes)) {
+    if (!key.startsWith("tab_")) continue;
+    if (!newValue || newValue.failCount == null) continue;
+    const tabId = parseInt(key.slice(4), 10);
+    if (isNaN(tabId)) continue;
+    setBadgeDone(tabId, newValue.failCount);
+  }
+});

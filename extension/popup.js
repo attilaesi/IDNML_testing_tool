@@ -705,10 +705,15 @@ function renderResults(results, runAt, tabId) {
     footerEl.style.display = "flex";
   }
 
-  // Update badge with the accurate validator-based fail count
+  // Write validated failCount to storage — background.js listens and updates the badge.
   if (tabId != null) {
-    chrome.action.setBadgeText({ tabId, text: totalFail > 0 ? String(totalFail) : "✓" });
-    chrome.action.setBadgeBackgroundColor({ tabId, color: totalFail > 0 ? "#c53030" : "#276749" });
+    const key = `tab_${tabId}`;
+    chrome.storage.local.get(key, (stored) => {
+      const entry = stored[key];
+      if (entry) {
+        chrome.storage.local.set({ [key]: { ...entry, failCount: totalFail } });
+      }
+    });
   }
 }
 
