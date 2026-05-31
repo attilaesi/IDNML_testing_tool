@@ -2,29 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ad Inspector</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="container">
+
     <div class="header">
-      <div class="header-title">Ad Inspector</div>
-      <div class="tab-url" id="tab-url" title="">—</div>
+      <div class="header-left">
+        <div class="header-title">Ad Inspector</div>
+        <div class="tab-url" id="tab-url" title="">—</div>
+      </div>
+      <label class="toggle" title="Enable auto-run on page load">
+        <input type="checkbox" id="enabled-toggle">
+        <span class="toggle-slider"></span>
+      </label>
     </div>
 
-    <div class="controls">
-      <button id="run-btn" class="run-btn">Run Tests</button>
-      <span id="spinner" class="spinner" style="display:none"></span>
+    <div id="state-running" class="state-panel" style="display:none">
+      <span class="spinner"></span>
+      <span>Running tests…</span>
     </div>
 
-    <div id="error-msg" class="error-msg" style="display:none"></div>
+    <div id="state-waiting" class="state-panel state-waiting" style="display:none">
+      <span>Enable the toggle and load a page to run tests.</span>
+    </div>
+
+    <div id="state-error" class="state-panel state-error" style="display:none"></div>
 
     <div id="summary" class="summary" style="display:none"></div>
 
     <div id="results" class="results" style="display:none"></div>
-  </div>
 
+    <div id="footer" class="footer" style="display:none">
+      <span id="run-at"></span>
+      <button id="rerun-btn" class="rerun-btn">Re-run</button>
+    </div>
+
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

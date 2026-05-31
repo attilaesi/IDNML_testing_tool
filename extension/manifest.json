@@ -1,13 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Ad Inspector",
-  "version": "1.0",
-  "description": "Run ad quality tests on the current page",
-  "permissions": ["activeTab", "scripting"],
+  "version": "2.0",
+  "description": "Auto-runs ad quality tests on every page load",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Ad Inspector"
+  },
+  "background": {
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {
