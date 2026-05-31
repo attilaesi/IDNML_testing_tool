@@ -1,4 +1,5 @@
 "use strict";
+importScripts("shared/validators.js");
 
 // ---------------------------------------------------------------------------
 // Test files to inject (order matters — warnings_init last before runner)
@@ -105,15 +106,6 @@ function setBadgeError(tabId) {
   chrome.action.setBadgeBackgroundColor({ tabId, color: "#c53030" });
 }
 
-// ---------------------------------------------------------------------------
-// Count failures in raw results (without running validators —
-// we just check for _error keys to give a rough fail count for the badge).
-// Popup does full validation.
-// ---------------------------------------------------------------------------
-function roughFailCount(results) {
-  if (!results) return 0;
-  return Object.values(results).filter(v => v && v._error).length;
-}
 
 // ---------------------------------------------------------------------------
 // Main: listen for tab load complete
@@ -173,7 +165,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       },
     });
 
-    setBadgeDone(tabId, roughFailCount(results));
+    setBadgeDone(tabId, countValidatorFails(results));
   } catch (e) {
     await chrome.storage.local.set({
       [storageKey]: { url, status: "error", error: e.message, timestamp: Date.now() },
@@ -194,14 +186,3 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.local.remove(`tab_${tabId}`);
 });
 
-// When popup writes the validated failCount back to storage, update the badge.
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
-  for (const [key, { newValue }] of Object.entries(changes)) {
-    if (!key.startsWith("tab_")) continue;
-    if (!newValue || newValue.failCount == null) continue;
-    const tabId = parseInt(key.slice(4), 10);
-    if (isNaN(tabId)) continue;
-    setBadgeDone(tabId, newValue.failCount);
-  }
-});
