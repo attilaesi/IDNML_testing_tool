@@ -130,6 +130,13 @@ function hideStates() {
   }
 }
 
+function _formatJson(data) {
+  try {
+    const s = JSON.stringify(data, null, 2);
+    return s.length > 4000 ? s.slice(0, 4000) + "\n… (truncated)" : s;
+  } catch (_) { return String(data); }
+}
+
 function renderResults(results, runAt) {
   hideStates();
   const resultsEl = document.getElementById("results");
@@ -160,6 +167,21 @@ function renderResults(results, runAt) {
       const detail = document.createElement("div");
       detail.className = "test-detail";
 
+      // Expandable data panel — shown on click
+      const expandBtn = document.createElement("span");
+      expandBtn.className = "expand-btn";
+      expandBtn.textContent = "▶";
+
+      const dataPanel = document.createElement("div");
+      dataPanel.className = "test-data";
+
+      if (data !== undefined && data !== null && !data._error) {
+        const pre = document.createElement("pre");
+        pre.className = "data-json";
+        pre.textContent = _formatJson(data);
+        dataPanel.appendChild(pre);
+      }
+
       if (data === undefined || data === null) {
         badge.className += " badge-skip";
         badge.textContent = "NO DATA";
@@ -174,7 +196,6 @@ function renderResults(results, runAt) {
         if (!validator) {
           badge.className += " badge-info";
           badge.textContent = "INFO";
-          try { detail.textContent = JSON.stringify(data, null, 2).slice(0, 300); } catch (_) {}
         } else {
           const errors = validator(data, results);
           if (errors.length === 0) {
@@ -190,12 +211,20 @@ function renderResults(results, runAt) {
         }
       }
 
+      // Wire expand toggle
+      row.addEventListener("click", () => {
+        const open = dataPanel.classList.toggle("open");
+        expandBtn.textContent = open ? "▼" : "▶";
+      });
+
       const topRow = document.createElement("div");
       topRow.className = "test-top";
       topRow.appendChild(label);
       topRow.appendChild(badge);
+      topRow.appendChild(expandBtn);
       row.appendChild(topRow);
       if (detail.textContent) row.appendChild(detail);
+      row.appendChild(dataPanel);
       resultsEl.appendChild(row);
     }
   }

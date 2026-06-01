@@ -158,7 +158,11 @@ body {
   padding: 5px 14px;
   border-bottom: 1px solid #edf2f7;
   background: #fff;
+  cursor: pointer;
+  user-select: none;
 }
+
+.test-row:hover { background: #f7fafc; }
 
 .test-top {
   display: flex;
@@ -204,6 +208,41 @@ body {
 }
 
 .test-row:has(.badge-info) .test-detail { color: #2c5282; border-left-color: #bee3f8; }
+
+/* ---- Expand button ---- */
+.expand-btn {
+  font-size: 8px;
+  color: #a0aec0;
+  flex-shrink: 0;
+  margin-left: 2px;
+  transition: color 0.15s;
+}
+
+.test-row:hover .expand-btn { color: #718096; }
+
+/* ---- Expandable data panel ---- */
+.test-data {
+  display: none;
+  margin-top: 6px;
+}
+
+.test-data.open { display: block; }
+
+.data-json {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  color: #4a5568;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  padding: 6px 8px;
+  margin: 0;
+}
 
 /* ---- Footer ---- */
 .footer {
