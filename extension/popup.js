@@ -176,7 +176,7 @@ function renderResults(results, runAt) {
           badge.textContent = "INFO";
           try { detail.textContent = JSON.stringify(data, null, 2).slice(0, 300); } catch (_) {}
         } else {
-          const errors = validator(data);
+          const errors = validator(data, results);
           if (errors.length === 0) {
             badge.className += " badge-pass";
             badge.textContent = "PASS";
@@ -231,16 +231,14 @@ async function triggerRerun(tabId) {
       target: { tabId },
       world: "MAIN",
       func: function () {
-        return new Promise((resolve) => {
-          const start = Date.now();
-          const check = () => {
-            const hasPbjs   = !!(window.pbjs && Array.isArray(window.pbjs.que));
-            const hasEvents = (window.__pbjsBidEventsDisplay || []).length > 0
-                           || (window.__pbjsBidEventsVideo   || []).length > 0;
-            if (hasPbjs && hasEvents) return resolve("ready");
-            if (Date.now() - start > 15000) return resolve("timeout");
-            setTimeout(check, 300);
-          };
+        return new Promise(function (resolve) {
+          var MAX_DISPLAY = 15000, MAX_VIDEO = 15000, INTERVAL = 300, start = Date.now();
+          function hasPbjs()    { return !!(window.pbjs && Array.isArray(window.pbjs.que)); }
+          function hasDisplay() { return (window.__pbjsBidEventsDisplay || []).length > 0; }
+          function hasVideo()   { return (window.__pbjsBidEventsVideo   || []).length > 0; }
+          function getPageType() { try { var pt = window.googletag && googletag.pubads && googletag.pubads().getTargeting("pageType"); return pt && pt[0] ? String(pt[0]).toLowerCase() : ""; } catch(e) { return ""; } }
+          function waitVideo() { var vs = Date.now(); function poll() { if (hasVideo()) return resolve("ready"); if (Date.now()-vs > MAX_VIDEO) return resolve("timeout_video"); setTimeout(poll, INTERVAL); } poll(); }
+          function check() { if (hasPbjs() && hasDisplay()) { return getPageType() === "video" ? waitVideo() : resolve("ready"); } if (Date.now()-start > MAX_DISPLAY) return resolve("timeout"); setTimeout(check, INTERVAL); }
           check();
         });
       },

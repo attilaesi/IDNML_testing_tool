@@ -47,23 +47,45 @@ const TEST_FILES = [
 ];
 
 // ---------------------------------------------------------------------------
-// Readiness poller — injected into the page, resolves when Prebid has fired
-// or after MAX_WAIT ms. Self-contained (no closure references).
+// Readiness poller — injected into the page. Self-contained (no closures).
+// Phase 1: wait for pbjs + display events (up to 15s).
+// Phase 2: if pageType === "video", also wait for video events (up to 15s
+//          extra) — covers click-to-play and in-view autoplay players.
 // ---------------------------------------------------------------------------
 function pbjsReadinessPoller() {
   return new Promise((resolve) => {
-    const MAX_WAIT = 15000;
-    const INTERVAL = 300;
+    const MAX_DISPLAY = 15000;
+    const MAX_VIDEO   = 15000;
+    const INTERVAL    = 300;
     const start = Date.now();
 
-    const check = () => {
-      const hasPbjs   = !!(window.pbjs && Array.isArray(window.pbjs.que));
-      const hasEvents = (window.__pbjsBidEventsDisplay || []).length > 0
-                     || (window.__pbjsBidEventsVideo   || []).length > 0;
-      if (hasPbjs && hasEvents) return resolve("ready");
-      if (Date.now() - start > MAX_WAIT) return resolve("timeout");
+    function hasPbjs()    { return !!(window.pbjs && Array.isArray(window.pbjs.que)); }
+    function hasDisplay() { return (window.__pbjsBidEventsDisplay || []).length > 0; }
+    function hasVideo()   { return (window.__pbjsBidEventsVideo   || []).length > 0; }
+    function getPageType() {
+      try {
+        var pt = window.googletag && googletag.pubads && googletag.pubads().getTargeting("pageType");
+        return pt && pt[0] ? String(pt[0]).toLowerCase() : "";
+      } catch (e) { return ""; }
+    }
+
+    function waitVideo() {
+      var vs = Date.now();
+      function poll() {
+        if (hasVideo()) return resolve("ready");
+        if (Date.now() - vs > MAX_VIDEO) return resolve("timeout_video");
+        setTimeout(poll, INTERVAL);
+      }
+      poll();
+    }
+
+    function check() {
+      if (hasPbjs() && hasDisplay()) {
+        return getPageType() === "video" ? waitVideo() : resolve("ready");
+      }
+      if (Date.now() - start > MAX_DISPLAY) return resolve("timeout");
       setTimeout(check, INTERVAL);
-    };
+    }
 
     check();
   });
