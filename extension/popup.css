@@ -258,9 +258,16 @@ body {
 #run-at {
   font-size: 10px;
   color: #718096;
+  flex: 1;
 }
 
-.rerun-btn {
+.footer-btns {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.footer-btn {
   background: none;
   border: 1px solid #cbd5e0;
   border-radius: 4px;
@@ -269,7 +276,9 @@ body {
   font-weight: 600;
   color: #4a5568;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
-.rerun-btn:hover { background: #edf2f7; }
+.footer-btn:hover { background: #edf2f7; }
+
+#copy-btn:active { background: #c6f6d5; color: #22543d; border-color: #9ae6b4; }

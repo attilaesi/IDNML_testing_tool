@@ -130,6 +130,9 @@ function hideStates() {
   }
 }
 
+// Last rendered payload — populated by renderResults(), read by copy button.
+let _copyPayload = null;
+
 function _formatJson(data) {
   try {
     const s = JSON.stringify(data, null, 2);
@@ -146,6 +149,7 @@ function renderResults(results, runAt) {
   resultsEl.style.display = "block";
 
   let totalPass = 0, totalFail = 0, totalSkip = 0;
+  const copyResults = {};
 
   for (const [category, testNames] of Object.entries(CATEGORIES)) {
     const catHeader = document.createElement("div");
@@ -211,6 +215,24 @@ function renderResults(results, runAt) {
         }
       }
 
+      // Build copy payload entry for this test
+      {
+        let status = "NO DATA", errors = [];
+        if (data !== undefined && data !== null) {
+          if (data._error) { status = "ERROR"; errors = [data._error]; }
+          else {
+            const validator = VALIDATORS[name];
+            if (!validator) { status = "INFO"; }
+            else {
+              const ve = validator(data, results);
+              status = ve.length === 0 ? "PASS" : "FAIL";
+              errors = ve;
+            }
+          }
+        }
+        copyResults[name] = { status, errors, data: data ?? null };
+      }
+
       // Wire expand toggle
       row.addEventListener("click", () => {
         const open = dataPanel.classList.toggle("open");
@@ -232,6 +254,14 @@ function renderResults(results, runAt) {
   summaryEl.textContent = `${totalPass} passed  /  ${totalFail} failed  /  ${totalSkip} no data`;
   summaryEl.className = "summary " + (totalFail > 0 ? "summary-fail" : "summary-pass");
   summaryEl.style.display = "block";
+
+  // Store copy payload
+  _copyPayload = {
+    url:     document.getElementById("tab-url").title || document.getElementById("tab-url").textContent,
+    run_at:  runAt || "",
+    summary: { passed: totalPass, failed: totalFail, no_data: totalSkip },
+    results: copyResults,
+  };
 
   if (runAt) {
     document.getElementById("run-at").textContent = "Run at " + runAt;
@@ -318,6 +348,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   const storageKey = `tab_${tab.id}`;
 
   rerunBtn.addEventListener("click", () => triggerRerun(tab.id));
+
+  const copyBtn = document.getElementById("copy-btn");
+  copyBtn.addEventListener("click", async () => {
+    if (!_copyPayload) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(_copyPayload, null, 2));
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = "Copy JSON"; }, 2000);
+    } catch (_) {
+      copyBtn.textContent = "Failed";
+      setTimeout(() => { copyBtn.textContent = "Copy JSON"; }, 2000);
+    }
+  });
 
   // Poll storage until we have results for the current URL
   const poll = async () => {
