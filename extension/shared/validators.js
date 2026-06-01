@@ -102,10 +102,17 @@ const VALIDATORS = {
       errors.push("No display Prebid activity observed."); return errors;
     }
     const hasCfg = Boolean(floors.has_floors_config), enabled = Boolean(floors.enabled);
-    if (!floors.module_present && !hasCfg) errors.push("Display floors: priceFloors module not installed and no floors config present");
-    if (hasCfg && !enabled) errors.push("Display floors: floors config present but disabled");
-    if (hasCfg && enabled && !parseInt(floors.rules_count || 0, 10)) errors.push("Display floors: no floor rules configured");
-    else if (hasCfg && enabled && !parseInt(floors.display_applicable_rules_count || 0, 10)) errors.push("Display floors: no display-applicable floor rules found");
+    if (!floors.module_present && !hasCfg) {
+      errors.push("Display floors: priceFloors module not installed and no floors config present");
+    } else if (floors.module_present && !hasCfg) {
+      errors.push("Display floors: module installed but no floors config found in pbjs.getConfig() — display bids are happening without floors");
+    } else if (hasCfg && !enabled) {
+      errors.push("Display floors: floors config present but disabled");
+    } else if (hasCfg && enabled && !parseInt(floors.rules_count || 0, 10)) {
+      errors.push("Display floors: no floor rules configured");
+    } else if (hasCfg && enabled && !parseInt(floors.display_applicable_rules_count || 0, 10)) {
+      errors.push("Display floors: no display-applicable floor rules found");
+    }
     return errors;
   },
 
@@ -118,10 +125,17 @@ const VALIDATORS = {
       return errors;
     }
     const hasCfg = Boolean(floors.has_floors_config), enabled = Boolean(floors.enabled);
-    if (!floors.module_present && !hasCfg) errors.push("Video floors: priceFloors module not installed and no floors config present");
-    if (hasCfg && !enabled) errors.push("Video floors: floors config present but disabled");
-    if (hasCfg && enabled && !parseInt(floors.rules_count || 0, 10)) errors.push("Video floors: no floor rules configured");
-    else if (hasCfg && enabled && !parseInt(floors.video_applicable_rules_count || 0, 10)) errors.push("Video floors: no video-applicable floor rules found");
+    if (!floors.module_present && !hasCfg) {
+      errors.push("Video floors: priceFloors module not installed and no floors config present");
+    } else if (floors.module_present && !hasCfg) {
+      errors.push("Video floors: module installed but no floors config found in pbjs.getConfig() — video bids are happening without floors");
+    } else if (hasCfg && !enabled) {
+      errors.push("Video floors: floors config present but disabled");
+    } else if (hasCfg && enabled && !parseInt(floors.rules_count || 0, 10)) {
+      errors.push("Video floors: no floor rules configured");
+    } else if (hasCfg && enabled && !parseInt(floors.video_applicable_rules_count || 0, 10)) {
+      errors.push("Video floors: no video-applicable floor rules found");
+    }
     return errors;
   },
 
