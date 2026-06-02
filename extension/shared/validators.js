@@ -32,13 +32,13 @@ const VALIDATORS = {
   },
 
   "pbjs_video_bidder_presence": (data, allResults) => {
-    const errors = [];
-    if (!data || !data.hasPbjs) { errors.push("window.pbjs not present; cannot run video bidder presence test."); return errors; }
+    if (!data || !data.hasPbjs) return ["window.pbjs not present; cannot run video bidder presence test."];
     if (parseInt(data.heroBidRequestedEvents || 0, 10) === 0) {
-      if (_isVideoPage(allResults)) errors.push("No hero_player VIDEO bidRequested events found (video page — expected video activity).");
-      return errors;
+      return _isVideoPage(allResults)
+        ? ["No hero_player VIDEO bidRequested events found (video page — expected video activity)."]
+        : null; // SKIP — no video on this page type
     }
-    return errors;
+    return [];
   },
 
   "pbjs_auction_activity": (data) => {
@@ -121,8 +121,9 @@ const VALIDATORS = {
     const floors = (data && data.prebid_floors_video) ? data.prebid_floors_video : (data || {});
     for (const e of (floors.errors || [])) errors.push("Extraction warning: " + e);
     if (!floors.has_video_store || parseInt(floors.video_bidrequested_events || 0, 10) === 0) {
-      if (_isVideoPage(allResults)) errors.push("No video Prebid activity observed (video page — poller waited but no video events fired).");
-      return errors;
+      return _isVideoPage(allResults)
+        ? ["No video Prebid activity observed (video page — poller waited but no video events fired)."]
+        : null; // SKIP — no video on this page type
     }
     const hasCfg = Boolean(floors.has_floors_config), enabled = Boolean(floors.enabled);
     if (!floors.module_present && !hasCfg) {
@@ -149,7 +150,9 @@ const VALIDATORS = {
   "pbjs_pubcid_presence_video": (data, allResults) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not found"];
     if (parseInt(data.heroBidsConsidered || 0, 10) === 0) {
-      return _isVideoPage(allResults) ? ["No VIDEO hero_player bids captured on a video page; cannot confirm pubcid."] : [];
+      return _isVideoPage(allResults)
+        ? ["No VIDEO hero_player bids captured on a video page; cannot confirm pubcid."]
+        : null; // SKIP — no video on this page type
     }
     const missing = data.biddersMissingPubcid || [];
     return missing.length ? ["pubcid missing for VIDEO bidders: " + missing.join(", ")] : [];
@@ -170,7 +173,9 @@ const VALIDATORS = {
   "pbjs_hero_player_placement": (data, allResults) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not present"];
     if (parseInt(data.eventsLen || 0, 10) === 0 || parseInt(data.heroBidsTotal || 0, 10) === 0) {
-      return _isVideoPage(allResults) ? ["No hero_player bids found on a video page (poller waited but no video events fired)."] : [];
+      return _isVideoPage(allResults)
+        ? ["No hero_player bids found on a video page (poller waited but no video events fired)."]
+        : null; // SKIP — no video on this page type
     }
     const lines = [];
     for (const bidder of Object.keys(data.perBidder || {}).sort()) {
@@ -306,12 +311,15 @@ const VALIDATORS = {
 };
 
 // Count how many tests fail validation against raw results object
+// null = SKIP, [] = PASS, ["msg"] = FAIL
 function countValidatorFails(results) {
   let fails = 0;
   for (const [name, data] of Object.entries(results || {})) {
     if (!data || data._error) { fails++; continue; }
     const validator = VALIDATORS[name];
-    if (validator && validator(data, results).length > 0) fails++;
+    if (!validator) continue;
+    const result = validator(data, results);
+    if (result !== null && result.length > 0) fails++;
   }
   return fails;
 }

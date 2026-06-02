@@ -133,6 +133,16 @@ function hideStates() {
 // Last rendered payload — populated by renderResults(), read by copy button.
 let _copyPayload = null;
 
+function _stripNoise(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const out = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (k === "installed_modules") continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function _formatJson(data) {
   try {
     const s = JSON.stringify(data, null, 2);
@@ -182,7 +192,7 @@ function renderResults(results, runAt) {
       if (data !== undefined && data !== null && !data._error) {
         const pre = document.createElement("pre");
         pre.className = "data-json";
-        pre.textContent = _formatJson(data);
+        pre.textContent = _formatJson(_stripNoise(data));
         dataPanel.appendChild(pre);
       }
 
@@ -202,7 +212,11 @@ function renderResults(results, runAt) {
           badge.textContent = "INFO";
         } else {
           const errors = validator(data, results);
-          if (errors.length === 0) {
+          if (errors === null) {
+            badge.className += " badge-skip";
+            badge.textContent = "SKIP";
+            totalSkip++;
+          } else if (errors.length === 0) {
             badge.className += " badge-pass";
             badge.textContent = "PASS";
             totalPass++;
@@ -225,12 +239,13 @@ function renderResults(results, runAt) {
             if (!validator) { status = "INFO"; }
             else {
               const ve = validator(data, results);
-              status = ve.length === 0 ? "PASS" : "FAIL";
-              errors = ve;
+              if (ve === null)       { status = "SKIP"; }
+              else if (ve.length === 0) { status = "PASS"; }
+              else                   { status = "FAIL"; errors = ve; }
             }
           }
         }
-        copyResults[name] = { status, errors, data: data ?? null };
+        copyResults[name] = { status, errors, data: _stripNoise(data ?? null) };
       }
 
       // Wire expand toggle
