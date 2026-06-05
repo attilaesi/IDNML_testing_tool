@@ -77,6 +77,11 @@ async def main():
         metavar="TEST1,TEST2",
         help="Comma-separated list of tests to run (e.g. gpt_gam_bid_keys_test,layout_ad_sequence_test).",
     )
+    parser.add_argument(
+        "--sheets",
+        action="store_true",
+        help="Write results to a Google Sheet (URL | Page Type | Result | Fail Reason).",
+    )
     args = parser.parse_args()
 
     # Resolve test names
@@ -137,6 +142,22 @@ async def main():
     _elapsed = time.monotonic() - _t_start
 
     print_results(results, framework, config, _elapsed)
+
+    if args.sheets and results:
+        from core.sheets_writer import SheetsWriter
+        from datetime import datetime
+        writer = SheetsWriter(config)
+        test_label = (test_names[0] if test_names and len(test_names) == 1 else "crawler")
+        sheet_url = await writer.write_crawler_report(
+            results=results,
+            run_meta={
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "site": config.get("active_site", ""),
+                "test": test_label,
+            },
+        )
+        if sheet_url:
+            print(f"\nGoogle Sheet: {sheet_url}")
 
     print()
 

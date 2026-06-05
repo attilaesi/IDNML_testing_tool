@@ -126,6 +126,8 @@ class VideoOnlyTest(BaseTest):
     """
 
     async def setup(self, page, url: str) -> bool:
+        if (self.config.get("geo") or "").strip().lower() == "us":
+            return False
         if not await self._is_video_page(page):
             return False
         return await self._video_setup(page, url)

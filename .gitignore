@@ -36,3 +36,6 @@ cmp_debug/*
 # Service account key files — never commit
 ads-testing-*.json
 adunit-ads-testing-*.json
+
+# Local Claude conversation context (not for source control)
+.claude_context.md

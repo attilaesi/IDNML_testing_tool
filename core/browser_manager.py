@@ -279,15 +279,22 @@ class BrowserManager:
                 browser_cap = "chrome"
                 os_caps = _BS_CHROME_OS
 
+        _GEO_TO_BS = {"uk": "GB", "us": "US"}
+        geo = (self.config.get("geo") or "").strip().lower()
+        site = self.config.get("active_site", "")
+        build_name = " ".join(filter(None, ["IDNML", site, geo.upper()]))
+        session_name = " ".join(filter(None, [device_name or "default", geo.upper()]))
         caps = {
             "browser": browser_cap,
             "browser_version": "latest",
             **os_caps,
-            "name": self.config.get("bs_session_name", "IDNML Ad Test"),
-            "build": self.config.get("bs_build_name", "IDNML"),
+            "name": session_name,
+            "build": build_name,
             "browserstack.username": username,
             "browserstack.accessKey": access_key,
         }
+        if geo and geo in _GEO_TO_BS:
+            caps["browserstack.geoLocation"] = _GEO_TO_BS[geo]
 
         cdp_url = (
             f"wss://cdp.browserstack.com/playwright"

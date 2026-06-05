@@ -93,7 +93,6 @@ def discover_tests() -> Tuple[Dict[str, Type[BaseTest]], Dict[str, List[str]]]:
             snake = _to_snake(name)
             tests[snake] = obj
             test_categories[category].append(snake)
-            print(f"Discovered test: {snake} in category {category}")
 
     return tests, test_categories
 

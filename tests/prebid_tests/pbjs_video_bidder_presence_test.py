@@ -12,6 +12,7 @@ or mediaTypes.video is present — bidderCode alone is not sufficient.
 
 Test conditions
 ---------------
+- Geo must not be US (US uses a different video player; Prebid video auction does not run).
 - Page must be a video page (pageType == video); otherwise skipped.
 - window.pbjs must be present (otherwise skipped).
 - Supabase must be configured (otherwise skipped).
@@ -23,7 +24,7 @@ What counts as PASS / FAIL / SKIP
 - FAILED: Supabase returns 0 rows for the explicit context (configuration/mapping error).
 - FAILED: expected video bidders missing from the observed hero_player auction.
 - FAILED: video bidders observed that are not in the expected set.
-- SKIPPED: non-video page, pbjs missing, or Supabase not configured.
+- SKIPPED: US geo, non-video page, pbjs missing, or Supabase not configured.
 """
 
 from pathlib import Path
@@ -139,7 +140,13 @@ class PbjsVideoBidderPresenceTest(VideoOnlyTest):
             if isinstance(code, str) and code.strip():
                 bidders.add(code.strip())
 
-        return sorted(bidders)
+        result = sorted(bidders)
+        if self.config.get("trace"):
+            print(
+                f"[PbjsVideoBidderPresenceTest] Supabase returned {len(result)} bidders:",
+                result,
+            )
+        return result
 
     async def validate(self, result: TestResult) -> TestResult:
         diag: Dict[str, Any] = result.data or {}
@@ -235,6 +242,21 @@ class PbjsVideoBidderPresenceTest(VideoOnlyTest):
 
         missing = sorted(expected - seen)
         unexpected = sorted(seen - expected)
+
+        if self.config.get("trace"):
+            print(
+                f"[PbjsVideoBidderPresenceTest] VIDEO bidder comparison (hero_player)"
+                f" | context: publisher={publisher}, env={environment}, geo={geo},"
+                f" device={device}, page_type={db_page_type}"
+                f" | events in window.__pbjsBidEventsVideo: {diag.get('eventsLen', 0)}"
+                f" ({diag.get('bidRequestedEvents', 0)} bidRequested,"
+                f" {diag.get('heroBidRequestedEvents', 0)} hero_player bidRequested,"
+                f" {diag.get('heroBidsTotal', 0)} hero bids)"
+                f"\n  Supabase expected ({len(expected_list)}): {expected_list}"
+                f"\n  Seen from events  ({len(seen)}): {sorted(seen)}"
+                f"\n  Missing           ({len(missing)}): {missing}"
+                f"\n  Unexpected        ({len(unexpected)}): {unexpected}"
+            )
 
         if missing or unexpected:
             result.state = TestState.FAILED

@@ -235,16 +235,17 @@ class SheetsWriter:
     # ── Auth ──────────────────────────────────────────────────────────────────
 
     def _build_client(self):
-        """Return (gspread_client, credentials) tuple.
+        """Return (gspread_client, credentials) tuple using OAuth user credentials.
 
-        OAuth mode (preferred): set SHEETS_OAUTH_CREDENTIALS to the path of the
-        OAuth client secret JSON (Desktop App type). Opens a browser on first run,
-        then caches a refresh token at ~/.config/gspread/ads-testing-token.json.
-        Files are created as the authenticated user — no service account quota issues.
-
-        Service account mode (fallback): set GOOGLE_SERVICE_ACCOUNT_JSON.
+        Set sheets_oauth_credentials in base_config (or SHEETS_OAUTH_CREDENTIALS env var)
+        to the path of the OAuth client secret JSON (Desktop App type).
+        Opens a browser on first run; subsequent runs are headless via a cached refresh token
+        at ~/.config/gspread/ads-testing-token.json.
         """
         import gspread
+        from google.oauth2.credentials import Credentials as UserCredentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        import google.auth.transport.requests
 
         SCOPES = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -255,49 +256,32 @@ class SheetsWriter:
             self.config.get("sheets_oauth_credentials")
             or os.getenv("SHEETS_OAUTH_CREDENTIALS")
         )
-
-        if oauth_client_file:
-            oauth_client_file = os.path.expanduser(oauth_client_file)
-        if oauth_client_file and os.path.isfile(oauth_client_file):
-            # ── OAuth user credentials ────────────────────────────────────────
-            from google.oauth2.credentials import Credentials as UserCredentials
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            import google.auth.transport.requests
-
-            token_file = os.path.expanduser("~/.config/gspread/ads-testing-token.json")
-            os.makedirs(os.path.dirname(token_file), exist_ok=True)
-
-            creds = None
-            if os.path.isfile(token_file):
-                creds = UserCredentials.from_authorized_user_file(token_file, SCOPES)
-
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(google.auth.transport.requests.Request())
-                else:
-                    flow = InstalledAppFlow.from_client_secrets_file(oauth_client_file, SCOPES)
-                    creds = flow.run_local_server(port=0)
-                with open(token_file, "w") as f:
-                    f.write(creds.to_json())
-
-            return gspread.Client(auth=creds), creds
-
-        # ── Service account fallback ──────────────────────────────────────────
-        from google.oauth2.service_account import Credentials as SACredentials
-
-        sa_json = (
-            self.config.get("sheets_service_account_json")
-            or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-        )
-        if not sa_json:
+        if not oauth_client_file:
             raise EnvironmentError(
-                "Set SHEETS_OAUTH_CREDENTIALS (recommended) or "
-                "GOOGLE_SERVICE_ACCOUNT_JSON — see README → Google Sheets Setup."
+                "sheets_oauth_credentials not set — see README → Google Sheets Setup."
             )
-        if os.path.isfile(sa_json):
-            creds = SACredentials.from_service_account_file(sa_json, scopes=SCOPES)
-        else:
-            creds = SACredentials.from_service_account_info(json.loads(sa_json), scopes=SCOPES)
+        oauth_client_file = os.path.expanduser(oauth_client_file)
+        if not os.path.isfile(oauth_client_file):
+            raise EnvironmentError(
+                f"OAuth client file not found: {oauth_client_file}"
+            )
+
+        token_file = os.path.expanduser("~/.config/gspread/ads-testing-token.json")
+        os.makedirs(os.path.dirname(token_file), exist_ok=True)
+
+        creds = None
+        if os.path.isfile(token_file):
+            creds = UserCredentials.from_authorized_user_file(token_file, SCOPES)
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(google.auth.transport.requests.Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(oauth_client_file, SCOPES)
+                creds = flow.run_local_server(port=0)
+            with open(token_file, "w") as f:
+                f.write(creds.to_json())
+
         return gspread.Client(auth=creds), creds
 
     # ── Sync orchestrator ─────────────────────────────────────────────────────
@@ -325,7 +309,8 @@ class SheetsWriter:
 
         ts = run_meta.get("timestamp", "")
         site = run_meta.get("site", "")
-        title = f"Ad Tests — {ts}" + (f"  [{site}]" if site else "")
+        geo = run_meta.get("geo", "")
+        title = f"Ad Tests — {ts}" + (f"  [{site}]" if site else "") + (f"  [{geo}]" if geo else "")
 
         try:
             folder_id = (
@@ -695,13 +680,13 @@ class SheetsWriter:
         for i, u in enumerate(urls, start=1):
             data.append([f"U{i}", page_types.get(u, "unknown"), u])
 
+        fmt(1, 1, row() - 1, total_cols, CellFormat(verticalAlignment="TOP"))
+
         # ── Batch write ───────────────────────────────────────────────────────
         ws.update("A1", data, value_input_option="USER_ENTERED")
         if fmts:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=MATRIX_HEADER_ROW, cols=1)
-
-        fmt(1, 1, row() - 1, total_cols, CellFormat(verticalAlignment="TOP"))
 
         col_widths = {0: 220}
         for i in range(n_url_cols):
@@ -752,6 +737,7 @@ class SheetsWriter:
         site = run_meta.get("site", "")
         ts = run_meta.get("timestamp", "")
         env = run_meta.get("env", "")
+        geo = run_meta.get("geo", "")
 
         # ── Row 1: title banner ───────────────────────────────────────────────
         r = row()
@@ -766,6 +752,7 @@ class SheetsWriter:
         parts = [x for x in [
             f"Site: {site}" if site else "",
             f"Env: {env}" if env else "",
+            f"Geo: {geo}" if geo else "",
             f"Run: {ts}" if ts else "",
         ] if x]
         data.append(["   ".join(parts)])
@@ -859,13 +846,13 @@ class SheetsWriter:
 
             data.append(row_data)
 
+        fmt(1, 1, row() - 1, total_cols, CellFormat(verticalAlignment="TOP"))
+
         # ── Batch write ───────────────────────────────────────────────────────
         ws.update("A1", data, value_input_option="USER_ENTERED")
         if fmts:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=MATRIX_HEADER_ROW, cols=1)
-
-        fmt(1, 1, row() - 1, total_cols, CellFormat(verticalAlignment="TOP"))
 
         # Col 0: test name, col 1: playwright profile, cols 2-5: counts, rest: device cols
         col_widths = {0: 220, 1: 170, 2: 70, 3: 70, 4: 70, 5: 70}
@@ -1057,5 +1044,115 @@ class SheetsWriter:
         if fmts:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=HEADER_ROW, cols=1)
-
         self._set_column_widths(ws, {0: 220, 1: 300, 2: 300, 3: 350})
+        ws.spreadsheet.batch_update({"requests": [{"autoResizeDimensions": {"dimensions": {
+            "sheetId": ws.id, "dimension": "ROWS", "startIndex": 0, "endIndex": total_rows,
+        }}}]})
+
+    # ── Crawler flat report ───────────────────────────────────────────────────
+
+    async def write_crawler_report(
+        self,
+        results: List[TestResult],
+        run_meta: Optional[dict] = None,
+    ) -> Optional[str]:
+        """
+        Write a flat crawler report: one row per URL with columns
+        URL | Page Type | Result | Fail Reason.
+        Returns the spreadsheet URL, or None on failure.
+        """
+        meta = dict(run_meta or {})
+        meta.setdefault("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M"))
+        return await asyncio.to_thread(self._write_crawler_sync, results, meta)
+
+    def _write_crawler_sync(
+        self,
+        results: List[TestResult],
+        run_meta: dict,
+    ) -> Optional[str]:
+        try:
+            from gspread_formatting import CellFormat, Color, TextFormat, format_cell_ranges, set_frozen
+        except ImportError:
+            print("gspread-formatting not installed. Run: pip install gspread-formatting")
+            return None
+
+        try:
+            client, creds = self._build_client()
+        except Exception as e:
+            print(f"Google Sheets auth failed: {e}")
+            return None
+
+        ts   = run_meta.get("timestamp", "")
+        site = run_meta.get("site", "")
+        test = run_meta.get("test", "")
+        title = f"Crawler — {test or 'layout'} — {ts}" + (f"  [{site}]" if site else "")
+
+        try:
+            folder_id = self.config.get("sheets_drive_folder_id") or os.getenv("SHEETS_DRIVE_FOLDER_ID")
+            if folder_id:
+                from google.auth.transport.requests import AuthorizedSession
+                session = AuthorizedSession(creds)
+                resp = session.post(
+                    "https://www.googleapis.com/drive/v3/files",
+                    json={"name": title, "mimeType": "application/vnd.google-apps.spreadsheet", "parents": [folder_id]},
+                    params={"fields": "id"},
+                )
+                resp.raise_for_status()
+                spreadsheet = client.open_by_key(resp.json()["id"])
+            else:
+                spreadsheet = client.create(title)
+        except Exception as e:
+            print(f"Failed to create Google Sheet: {e}")
+            return None
+
+        share_email = self.config.get("sheets_share_email") or os.getenv("SHEETS_SHARE_EMAIL")
+        if share_email:
+            try:
+                spreadsheet.share(share_email, perm_type="user", role="writer")
+            except Exception:
+                pass
+
+        ws = spreadsheet.sheet1
+        ws.update_title("results")
+
+        # ── Build rows ────────────────────────────────────────────────────────
+        headers = ["URL", "Page Type", "Result", "Fail Reason"]
+        rows = [headers]
+        fmts = []
+
+        def _cell_color(state: TestState):
+            if state == TestState.PASSED:  return _PALETTE["pass"]
+            if state == TestState.SKIPPED: return _PALETTE["skip"]
+            return _PALETTE["fail"]
+
+        for i, r in enumerate(results, start=2):
+            meta_d = r.metadata if isinstance(r.metadata, dict) else {}
+            page_type = meta_d.get("page_type", "unknown") or "unknown"
+            state_str = r.state.value if r.state else "unknown"
+            msgs = r.errors if r.errors else (r.warnings or [])
+            fail_reason = " | ".join(str(m).strip().splitlines()[0] for m in msgs[:3]) if msgs else ""
+            rows.append([r.url or "", page_type, state_str.upper(), fail_reason])
+
+            bg = _cell_color(r.state)
+            color = Color(red=bg[0], green=bg[1], blue=bg[2])
+            fmts.append((f"C{i}", CellFormat(backgroundColor=color)))
+
+        ws.update("A1", rows, value_input_option="USER_ENTERED")
+
+        # Header formatting
+        header_bg = _PALETTE["header_dk"]
+        hdr_color = Color(red=header_bg[0], green=header_bg[1], blue=header_bg[2])
+        fmts.append(("A1:D1", CellFormat(
+            backgroundColor=hdr_color,
+            textFormat=TextFormat(bold=True, foregroundColor=Color(1, 1, 1)),
+        )))
+
+        if fmts:
+            format_cell_ranges(ws, fmts)
+
+        set_frozen(ws, rows=1)
+        self._set_column_widths(ws, {0: 520, 1: 100, 2: 80, 3: 420})
+
+        url = f"https://docs.google.com/spreadsheets/d/{spreadsheet.id}"
+        print(f"Google Sheet: {url}")
+        return url

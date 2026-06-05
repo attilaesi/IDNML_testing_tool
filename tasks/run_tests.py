@@ -41,6 +41,17 @@ async def main():
         action="store_true",
         help="Run via BrowserStack Automate instead of local Playwright.",
     )
+    parser.add_argument(
+        "--geo",
+        metavar="GEO",
+        choices=["uk", "us"],
+        help="Geo to test from (uk or us). Sets BrowserStack geoLocation and tags Supabase rows.",
+    )
+    parser.add_argument(
+        "--no-headless",
+        action="store_true",
+        help="Open a visible browser window instead of running headless.",
+    )
     args = parser.parse_args()
 
     cfg = TestConfig()
@@ -48,6 +59,12 @@ async def main():
         cfg.active_site = args.site
     if args.browserstack:
         cfg.browserstack_config["browserstack_enabled"] = True
+    if args.geo:
+        cfg.geo = args.geo.lower()
+        if not args.browserstack:
+            print(f"WARNING: --geo {args.geo} has no effect on browser location without --browserstack. CMP handling will still run.")
+    if args.no_headless:
+        cfg.browser_config["headless"] = False
     CONFIG = cfg.get_config()
 
     print_runner_banner(CONFIG, label="AD TEST RUN")
@@ -98,6 +115,7 @@ async def main():
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "site": CONFIG.get("active_site", ""),
             "env": env_from_url(CONFIG.get("site_url", "")),
+            "geo": (CONFIG.get("geo") or "").upper(),
             "device_names": {dev_key: dev_name},
             "regression": regression,
         }

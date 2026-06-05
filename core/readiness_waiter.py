@@ -1,17 +1,20 @@
 import asyncio
+from core.log_helpers import log_line
 
 
 class ReadinessWaiter:
     """Wait until pbjs and googletag are ready before running tests.
 
     On GPT video pages (pageType == "video"), also wait for a hero_player auction
-    to start (bidRequested containing bids for adUnitCode == "hero_player").
+    to start — unless require_hero_on_video is False (e.g. US geo where video
+    Prebid does not run).
     """
 
-    def __init__(self, timeout: float = 10.0, poll_interval: float = 0.5):
-        # ⬆️ Increase this to 15.0 / 20.0 etc if you want a longer overall wait
+    def __init__(self, timeout: float = 10.0, poll_interval: float = 0.5, require_hero_on_video: bool = True, device: str = ""):
         self.timeout = timeout
         self.poll_interval = poll_interval
+        self.require_hero_on_video = require_hero_on_video
+        self.device = device
 
     async def wait_for_prebid_and_gpt(self, page):
         hero_adunit = "hero_player"
@@ -188,9 +191,9 @@ class ReadinessWaiter:
                     and last_status.get("auctionStarted")
                 )
 
-                # On video pages, additionally require hero auction
+                # On video pages, additionally require hero auction (unless geo skips it)
                 if base_ready:
-                    if last_status.get("isVideoPage"):
+                    if last_status.get("isVideoPage") and self.require_hero_on_video:
                         if last_status.get("heroAuctionStarted"):
                             print(
                                 "✅ pbjs & GPT ready, auction started, hero_player auction started: "
@@ -228,9 +231,9 @@ class ReadinessWaiter:
             display_len = last_status.get("displayStoreLen")
             video_len = last_status.get("videoStoreLen")
 
-        print(
-            f"⚠️ Timeout waiting for pbjs/GPT/adUnits/auction readiness after {self.timeout}s "
-            f"(pageType={pt}, isVideoPage={is_video}, heroAuctionStarted={hero_started}, "
-            f"displayEvents={display_len}, videoEvents={video_len})"
-        )
+        print(log_line("READINESS", self.device,
+            message=f"Timeout after {self.timeout}s "
+                    f"(pageType={pt}, isVideoPage={is_video}, heroAuctionStarted={hero_started}, "
+                    f"displayEvents={display_len}, videoEvents={video_len})"
+        ))
         return False

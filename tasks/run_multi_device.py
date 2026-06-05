@@ -7,7 +7,7 @@
 #   python -m tasks.run_multi_device --devices desktop,mobile_ios
 #
 # Devices run sequentially by default (clean log output).
-# Set parallel_devices=True in base_config to run them concurrently.
+# Set device_concurrency > 1 in base_config to run devices concurrently.
 
 import argparse
 import asyncio
@@ -21,7 +21,7 @@ from config.device_config import DEVICE_SUITE
 from core.framework_manager import TestFramework
 from core.ansi import dim
 from core.url_context_helpers import env_from_url
-from tasks.common import print_results, print_runner_banner, _get_url_order
+from tasks.common import print_runner_banner, _get_url_order
 
 VALID_SITES = [
     "independent", "independent_uat", "independent_staging",
@@ -68,18 +68,14 @@ async def _run_one_device(
     if test_names:
         missing = [t for t in test_names if t not in framework.tests]
         if missing:
-            print(f"  ⚠️  Unknown test(s): {', '.join(missing)}")
+            print(f"[TESTS] Unknown test(s): {', '.join(missing)}")
             known = sorted(framework.tests.keys())
             print("  Known tests:\n" + "\n".join(f"    {t}" for t in known))
             return []
 
-    t0 = time.monotonic()
     results = await framework.run_tests(
         test_names=test_names,
     )
-    elapsed = time.monotonic() - t0
-
-    print_results(results, framework, config, elapsed)
     return results
 
 
@@ -115,6 +111,17 @@ async def main():
         action="store_true",
         help="Run via BrowserStack Automate instead of local Playwright.",
     )
+    parser.add_argument(
+        "--geo",
+        metavar="GEO",
+        choices=["uk", "us"],
+        help="Geo to test from (uk or us). Sets BrowserStack geoLocation and tags Supabase rows.",
+    )
+    parser.add_argument(
+        "--no-headless",
+        action="store_true",
+        help="Open a visible browser window instead of running headless.",
+    )
     args = parser.parse_args()
 
     # Build base config (site selection, URLs, etc.)
@@ -123,6 +130,12 @@ async def main():
         base_cfg.active_site = args.site
     if args.browserstack:
         base_cfg.browserstack_config["browserstack_enabled"] = True
+    if args.geo:
+        base_cfg.geo = args.geo.lower()
+        if not args.browserstack:
+            print(f"WARNING: --geo {args.geo} has no effect on browser location without --browserstack. CMP handling will still run.")
+    if args.no_headless:
+        base_cfg.browser_config["headless"] = False
 
     # Resolve which devices to run
     if args.devices:
@@ -140,7 +153,7 @@ async def main():
 
     # Resolve parallel mode from config
     sample_config = base_cfg.get_config()
-    parallel_devices = bool(sample_config.get("parallel_devices", False))
+    parallel_devices = int(sample_config.get("device_concurrency", 1) or 1) > 1
 
     site_id = sample_config.get("active_site", "")
     site_url = sample_config.get("site_url", "")
@@ -206,6 +219,7 @@ async def main():
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "site": combined_config.get("active_site", ""),
             "env": env_from_url(combined_config.get("site_url", "")),
+            "geo": (combined_config.get("geo") or "").upper(),
             "device_names": dict(active_suite),
             "regression": regression,
         }

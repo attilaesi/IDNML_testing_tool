@@ -57,7 +57,7 @@ class TaboolaLoadTimeTest(BaseTest):
         result = TestResult(self.name)
         result.url = url
 
-        timeout_ms = int(self.config.get("taboola_wait_timeout_ms", 15000))
+        timeout_ms = int(self.config.get("taboola_wait_timeout", 15)) * 1000
 
         # Build a JS array of [key, containerId] pairs to pass in
         placement_pairs = [[key, cid] for key, cid in PLACEMENTS]

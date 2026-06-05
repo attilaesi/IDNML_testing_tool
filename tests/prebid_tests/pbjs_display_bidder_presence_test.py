@@ -134,7 +134,13 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
             if isinstance(code, str) and code.strip():
                 bidders.add(code.strip())
 
-        return sorted(bidders)
+        result = sorted(bidders)
+        if self.config.get("trace"):
+            print(
+                f"[PbjsDisplayBidderPresenceTest] Supabase returned {len(result)} bidders:",
+                result,
+            )
+        return result
 
     async def validate(self, result: TestResult) -> TestResult:
         diag: Dict[str, Any] = result.data or {}
@@ -209,6 +215,19 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
 
         missing = sorted(expected - seen)
         unexpected = sorted(seen - expected)
+
+        if self.config.get("trace"):
+            print(
+                f"[PbjsDisplayBidderPresenceTest] DISPLAY bidder comparison"
+                f" | context: publisher={publisher}, env={environment}, geo={geo},"
+                f" device={device}, page_type={db_page_type}"
+                f" | events in window.__pbjsBidEventsDisplay: {diag.get('eventsLen', 0)}"
+                f" ({diag.get('bidRequestedEvents', 0)} bidRequested)"
+                f"\n  Supabase expected ({len(expected_list)}): {expected_list}"
+                f"\n  Seen from events  ({len(seen)}): {sorted(seen)}"
+                f"\n  Missing           ({len(missing)}): {missing}"
+                f"\n  Unexpected        ({len(unexpected)}): {unexpected}"
+            )
 
         if missing or unexpected:
             result.state = TestState.FAILED

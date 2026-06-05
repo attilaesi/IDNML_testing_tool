@@ -27,6 +27,10 @@ python -m tasks.run_tests --regression
 
 # Run via BrowserStack Automate (requires Automate plan + credentials in env.local)
 python -m tasks.run_tests --browserstack
+
+# Run from a specific geo (sets BrowserStack geoLocation + tags Supabase rows)
+python -m tasks.run_tests --browserstack --geo uk
+python -m tasks.run_tests --browserstack --geo us
 ```
 
 ---
@@ -104,6 +108,33 @@ This swaps the UAT domain for the feature branch URL across all configured test 
 self.light_ad_rules = True   # force feat__use_light_ad_rules=true
 self.light_ad_rules = False  # force feat__use_light_ad_rules=false
 self.light_ad_rules = None   # leave unset (page default)
+```
+
+### Geo
+
+Geo is driven from the CLI at runtime and should not normally be hardcoded in config. Pass `--geo uk` or `--geo us` when running:
+
+```bash
+python -m tasks.run_tests --geo uk
+python -m tasks.run_multi_device --geo us
+```
+
+What geo controls end-to-end:
+
+| System | Effect |
+|---|---|
+| BrowserStack | Sets `browserstack.geoLocation` so the session IP matches the geo (`uk` → GB, `us` → US) |
+| CMP handler | Skipped entirely for US (no consent banner shown in the US) |
+| Video tests | All `VideoOnlyTest` subclasses are skipped for US geo (different video player; no Prebid video auction in the US) |
+| Readiness waiter | Does not wait for hero_player auction on video pages when geo is US |
+| `context_summary.geo` | Explicitly set from config rather than inferred from the page Locale cookie |
+| Supabase rows | Every result row is tagged with the geo; regression diffs are scoped per geo (UK runs only compare against previous UK runs) |
+| Google Sheet | Geo shown in the sheet title and the summary tab run metadata row |
+
+You can set a default in `base_config.py` if needed:
+
+```python
+self.geo = "uk"   # "uk" | "us" | None (None = infer from Locale cookie)
 ```
 
 ---
@@ -213,8 +244,9 @@ python -m tasks.run_multi_device --test pbjs_display_bidder_presence_test
 # Upload results + regression diff
 python -m tasks.run_multi_device --regression
 
-# Run via BrowserStack
-python -m tasks.run_multi_device --browserstack
+# Run via BrowserStack from a specific geo
+python -m tasks.run_multi_device --browserstack --geo uk
+python -m tasks.run_multi_device --browserstack --geo us
 ```
 
 ### Output format
@@ -247,15 +279,19 @@ self.test_config["parallel_devices"] = True
 
 After each run, the framework creates a new timestamped Google Spreadsheet with colour-coded results. The URL is printed at the end of the run and the sheet is shared to your configured Google account.
 
+The sheet title includes the site and geo so you can tell runs apart at a glance:
+`Ad Tests — 2026-06-03 14:32  [independent_uat]  [UK]`
+
 ### Sheet layout
 
 | Tab | Contents |
 |---|---|
-| **test_run_summary** | Run header · per-device pass-rate table · cross-device comparison matrix with clickable hyperlinks from FAIL/MIXED cells to the relevant device tab |
+| **test_run_summary** | Run header (site · env · geo · timestamp) · per-device pass-rate table · cross-device comparison matrix with clickable hyperlinks from FAIL/MIXED cells to the relevant device tab |
 | **desktop** | Test × URL matrix · failure details · URL key |
 | **mobile_ios** | Same layout |
 | **mobile_android** | Same layout |
 | **tablet** | Same layout |
+| **regression** | New failures · known failures · fixed tests vs. the previous run for the same geo (only present when `--regression` is passed) |
 | **appendix** | Description, conditions, and pass/fail criteria for every test (from module docstrings) |
 
 Colour key: green = PASS · red = FAIL · dark red = ERROR · amber = MIXED · grey = SKIP
@@ -318,7 +354,21 @@ python -m tasks.run_tests --browserstack
 
 # All four devices
 python -m tasks.run_multi_device --browserstack
+
+# With geo — sets BrowserStack IP location and tags all results accordingly
+python -m tasks.run_multi_device --browserstack --geo uk
+python -m tasks.run_multi_device --browserstack --geo us
 ```
+
+### Geo and BrowserStack
+
+Without `--geo`, BrowserStack sessions run from a US IP by default. Always pass `--geo` explicitly to ensure the session IP, Supabase tagging, and regression scoping are all consistent.
+
+The `--geo uk` flag sets `browserstack.geoLocation: GB` in the session capabilities; `--geo us` sets `US`. No VPN configuration is needed — BrowserStack handles geo at the infrastructure level.
+
+### Session timeout protection
+
+Each URL worker in parallel mode has a hard timeout derived from your `timeout` and `prebid_ready_timeout` config values (default ~170s per URL). If a BrowserStack session drops mid-run (e.g. session quota exceeded), the worker exits cleanly rather than hanging the entire gather indefinitely.
 
 ### Device mapping
 
@@ -351,7 +401,13 @@ Pass `--regression` to any task to upload results to Supabase and include a week
 ```bash
 python -m tasks.run_tests --regression
 python -m tasks.run_multi_device --regression
+
+# Geo-specific regression — UK and US runs are tracked and compared independently
+python -m tasks.run_multi_device --browserstack --geo uk --regression
+python -m tasks.run_multi_device --browserstack --geo us --regression
 ```
+
+Each result row in Supabase is tagged with `geo`, `device`, `publisher`, and `environment`. Regression diffs are scoped to the same combination — a UK run only compares against the previous UK run, and a US run only against the previous US run. Running both geos on the same cadence gives you independent regression histories per geo.
 
 Supabase credentials are read from `env.local`:
 
@@ -368,7 +424,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
 - **Device detection** — Playwright's built-in device profiles set viewport, UA, touch, and `is_mobile`. `core/device_helpers.py` derives `mobile`/`desktop` from viewport aspect ratio (portrait = mobile).
 - **Prebid event capture** — A `context.add_init_script` hook fires before every page script and attaches `pbjs.onEvent` listeners, splitting events into `display` and `video` streams (`window.__pbjsBidEventsDisplay` / `window.__pbjsBidEventsVideo`).
 - **Basic auth** — Pre-prod credentials are passed via Playwright `http_credentials`, not via URL injection (which breaks `History.replaceState` and `fetch` on some pages).
-- **CMP** — Consent is handled once per session on the first URL; subsequent pages inherit the accepted consent from the shared browser context.
+- **CMP** — Consent is handled once per session on the first URL; subsequent pages inherit the accepted consent from the shared browser context. Skipped entirely for US geo (no consent banner shown in the US).
+- **Geo** — Passed via `--geo uk|us`. Controls the BrowserStack IP location, skips CMP and video Prebid tests for US, stamps every Supabase result row, and scopes regression diffs per geo. When set, takes precedence over the page's `Locale` cookie for `context_summary.geo`.
+- **Video tests** — All `VideoOnlyTest` subclasses (e.g. `pbjs_video_bidder_presence_test`) are skipped for US geo. The US uses a different video player with no Prebid auction for `hero_player`. The readiness waiter also skips waiting for the hero auction on video pages in US geo.
 - **Warmup** — Configurable warmup phase loads N pages before testing starts to prime the browser context and consent state.
-- **Parallel mode** — URLs can be tested in parallel using a bounded semaphore (`concurrency` in config). Each parallel worker gets its own page within the shared browser context.
+- **Parallel mode** — URLs can be tested in parallel using a bounded semaphore (`concurrency` in config). Each parallel worker gets its own page within the shared browser context. Each worker has a hard timeout (nav + readiness + 120s buffer) so a stale or dropped BrowserStack session cannot hang the run indefinitely.
 - **Test discovery** — `core/framework/discovery.py` auto-discovers all `BaseTest` subclasses from the `tests/` directory. No registration required; adding a new file is enough.

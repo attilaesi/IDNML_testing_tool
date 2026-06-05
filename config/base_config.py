@@ -42,20 +42,24 @@ class TestConfig:
         # Change ACTIVE_DEVICE in config/device_config.py to switch devices.
         self.browser_config = {
             "headless": True,
-            # Playwright default timeout (ms)
-            "timeout": 30000,
+            "timeout": 30,        # seconds — Playwright nav timeout
+            "slow_mo": 0,         # milliseconds between Playwright actions (local only)
             "device_name": ACTIVE_DEVICE,
+            "basic_auth_user": "demo",
+            "basic_auth_pass": "review",
         }
+
+        # Geo override — set via --geo uk / --geo us at the CLI.
+        # When set, overrides Locale-cookie detection and sets BrowserStack geoLocation.
+        # Leave as None to infer from the page's Locale cookie (legacy behaviour).
+        self.geo = None  # "uk" | "us" | None
 
         # BrowserStack Automate — off by default.
         # Enable via --browserstack CLI flag or set browserstack_enabled=True here.
         # Credentials are read from BROWSERSTACK_USERNAME / BROWSERSTACK_ACCESS_KEY env vars.
-        # bs_build_name groups sessions in the BrowserStack dashboard.
-        # bs_session_name labels individual sessions.
+        # Build and session names are auto-derived from active_site + geo + device.
         self.browserstack_config = {
             "browserstack_enabled": False,
-            "bs_build_name": "IDNML",
-            "bs_session_name": "Ad Test",
         }
 
         # Framework / test behaviour
@@ -63,33 +67,42 @@ class TestConfig:
             # Max number of URLs from the site profile to test in one run
             "max_pages": 10,
 
-            # Run pages sequentially or in parallel
-            "parallel_tests": True,
-            "concurrency": 2,       # only used when parallel_tests=True
+            # Per-URL concurrency: 1 = sequential, N = up to N pages in parallel
+            "concurrency": 2,
 
-            # Run all devices concurrently in multi-device runs
-            "parallel_devices": True,
+            # Per-device concurrency in multi-device runs: 1 = sequential, N = up to N devices in parallel
+            "device_concurrency": 4,
 
             # Debug / robustness settings
             "debug_screenshots": False,    # CMP / failure screenshots
-            "cmp_timeout": 3.0,            # seconds to wait for CMP dismiss
             "prebid_ready_timeout": 20.0,  # seconds to wait for pbjs + GPT
             "page_type_timeout": 3.0,      # seconds to poll for pageType
             "warmup_pages": 3,             # number of pages to run before testing start
 
             # 🔸 Global trace switch for extra console logging in tests
             "trace": False,
+
+            # Terminal matrix display
+            "matrix_max_test_width": 36,
+            "matrix_max_cell_width": 22,
+            "progress_inline": True,
+            "trace_spacing_between_tests": True,
         }
 
         # Taboola settings
         self.taboola_config = {
             "taboola_loader_url": "https://cdn.taboola.com/libtrc/eslmedia-theindependent/loader.js",
-            "taboola_wait_timeout_ms": 15000,
+            "taboola_wait_timeout": 15,   # seconds
         }
 
-        # Output configuration
-        self.output_config = {
-            "cmp_debug_dir": "output/cmp_debug",
+        # ─────────────────────────────────────────────────────────────
+        # Supabase — regression tracking
+        # ─────────────────────────────────────────────────────────────
+        # Credentials are read from env vars (SUPABASE_URL, SUPABASE_ANON_KEY).
+        # Override here if needed (not recommended — keep secrets out of source).
+        self.supabase_config = {
+            "supabase_url": None,       # falls back to SUPABASE_URL env var
+            "supabase_anon_key": None,  # falls back to SUPABASE_ANON_KEY env var
         }
 
         # ─────────────────────────────────────────────────────────────
@@ -97,13 +110,8 @@ class TestConfig:
         # ─────────────────────────────────────────────────────────────
         # Set sheets_enabled = True to write a new timestamped Google Sheet
         # at the end of every run (single-device and multi-device).
-        #
-        # Requires GOOGLE_SERVICE_ACCOUNT_JSON env var — see README for setup.
-        #
-        # sheets_share_email: your personal Google account email.
-        #   The new sheet will be shared with this address automatically
-        #   so it appears in your "Shared with me" Drive folder.
-        #   Can also be set via SHEETS_SHARE_EMAIL env var.
+        # Auth uses OAuth — set sheets_oauth_credentials to your Desktop App
+        # client secret JSON path (see README → Google Sheets Setup).
         self.sheets_config = {
             "sheets_enabled": True,
             "sheets_share_email": "attila.horvath@independent.co.uk",
@@ -129,14 +137,16 @@ class TestConfig:
         config = {}
         config.update(self.browser_config)
         config.update(self.test_config)
-        config.update(self.output_config)
         config.update(self.taboola_config)
+        config.update(self.supabase_config)
         config.update(self.sheets_config)
         config.update(self.browserstack_config)
 
         # Attach cookies (application is decided in framework_manager based on URL)
         config["preprod_cookies"] = self.preprod_cookies
         config["light_ad_rules"] = self.light_ad_rules
+        if self.geo:
+            config["geo"] = self.geo.strip().lower()
 
         # Attach site profile & URLs
         site_key = str(self.active_site).lower()

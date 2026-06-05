@@ -1,5 +1,7 @@
 import asyncio
 from typing import Any, List, Tuple
+from core.device_helpers import device_display_name
+from core.log_helpers import log_line
 
 
 class CMPHandler:
@@ -21,9 +23,14 @@ class CMPHandler:
     # ─────────────────────────────────────────────────────────────────
     async def handle_consent(self, page: Any, timeout: int = 10) -> None:
         """
-        Attempt to dismiss CMP once. Safe no-op if already handled.
+        Attempt to dismiss CMP once. Safe no-op if already handled or US geo.
         """
         if self.cmp_handled:
+            return
+        browserstack = bool(self.config.get("browserstack_enabled", False))
+        if (self.config.get("geo") or "").strip().lower() == "us" and browserstack:
+            print(log_line("CMP", device_display_name(self.config), message="Skipping — US geo (BrowserStack)"))
+            self.cmp_handled = True
             return
         clicked = await self._dismiss_any_cmp(page, timeout=timeout)
         if clicked:
@@ -71,33 +78,33 @@ class CMPHandler:
                 # 1) Try CSS on the main page
                 for sel in css_sequence:
                     if await self._try_click_css(page, sel):
-                        print(f"✅ CMP: clicked via CSS selector: {sel}")
+                        print(log_line("CMP", device_display_name(self.config), message=f"Clicked via CSS: {sel}"))
                         return True
 
                 # 2) Try XPath on the main page
                 for xp in xpath_selectors:
                     if await self._try_click_xpath(page, xp):
-                        print(f"✅ CMP: clicked via XPath selector: {xp}")
+                        print(log_line("CMP", device_display_name(self.config), message=f"Clicked via XPath: {xp}"))
                         return True
 
                 # 3) Try inside iframes
                 for frame in page.frames:
                     for sel in css_sequence:
                         if await self._try_click_css(frame, sel):
-                            print(f"✅ CMP: clicked (iframe) via CSS selector: {sel}")
+                            print(log_line("CMP", device_display_name(self.config), message=f"Clicked (iframe) via CSS: {sel}"))
                             return True
                     for xp in xpath_selectors:
                         if await self._try_click_xpath(frame, xp):
-                            print(f"✅ CMP: clicked (iframe) via XPath selector: {xp}")
+                            print(log_line("CMP", device_display_name(self.config), message=f"Clicked (iframe) via XPath: {xp}"))
                             return True
 
             except Exception as e:
                 # Don't let CMP handling break the run
-                print(f"ℹ️ CMP: exception while searching/clicking: {e}")
+                print(log_line("CMP", device_display_name(self.config), message=f"Exception: {e}"))
 
             await asyncio.sleep(0.25)
 
-        print("ℹ️ CMP: no consent dialog found within timeout")
+        print(log_line("CMP", device_display_name(self.config), message="No consent dialog found within timeout"))
         return False
 
     # ─────────────────────────────────────────────────────────────────

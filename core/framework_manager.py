@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from core.readiness_waiter import ReadinessWaiter
 from core.base_test import BaseTest, TestResult, TestState, _to_snake
 from core.browser_manager import BrowserManager
-from core.device_helpers import device_label, is_mobile_viewport
+from core.device_helpers import device_label, device_display_name, is_mobile_viewport
 from core.cmp_handler import CMPHandler
 from core.url_context_helpers import (
     map_pagetype_to_db,
@@ -17,6 +17,7 @@ from core.url_context_helpers import (
     env_from_url,
 )
 from core.ansi import colour_cell, colour_state, dim
+from core.log_helpers import log_line, log_arrow_indent
 
 from config.site_test_plans import SITE_TEST_PLANS
 
@@ -106,8 +107,7 @@ class TestFramework:
                 c.setdefault("domain", domain)  # apply current host if not set
                 cookies.append(c)
 
-        # Preprod only: set is_mobile_or_tablet from viewport so the site behaves
-        # as if device detection already ran. Live/staging set this themselves.
+        # UAT has no CDN so device detection doesn't run server-side — set it explicitly.
         if apply_preprod_cookies:
             cookies.append({
                 "name": "is_mobile_or_tablet",
@@ -126,12 +126,8 @@ class TestFramework:
 
         try:
             await page.context.add_cookies(cookies)
-            print(
-                f"🌍 Context cookies set (device={device_label(self.config)}, preprod_cookies={apply_preprod_cookies}): "
-                f"{[c['name'] + '=' + c['value'] for c in cookies]}"
-            )
         except Exception as e:
-            print(f"⚠️ Failed to set context cookies: {e}")
+            print(log_line("COOKIES", device_display_name(self.config), message=f"Failed to set: {e}"))
 
     # ------------- Locale detection -------------
 
@@ -469,12 +465,7 @@ class TestFramework:
         """
         urls = list(self.config.get("urls", []))
         if not urls:
-            print("⚠️ No URLs configured. Check config/site_urls.py and base_config.py")
-
-        print(
-            f"🧭 Using {len(urls)} URLs from site profile "
-            f"({self.config.get('active_site')})"
-        )
+            print(log_line("CONFIG", message="No URLs configured. Check config/site_urls.py and base_config.py"))
         return urls
 
     # ------------- Warmup runner -------------
@@ -496,23 +487,26 @@ class TestFramework:
 
         No tests are run and no results are recorded.
         """
-        print(f"[WARMUP {warm_idx}/{total_warm}] {url}")
-
+        print(log_line("WARMUP", device_display_name(self.config), f"url {warm_idx}/{total_warm}", url))
         auth_url = self._add_basic_auth_to_url(url)
-        nav_timeout = int(self.config.get("timeout", 30000))
+        nav_timeout = int(self.config.get("timeout", 30)) * 1000
 
         try:
             await self._set_context_cookies(page, auth_url)
             await page.goto(auth_url, wait_until="domcontentloaded", timeout=nav_timeout)
         except Exception as e:
-            print(f"[WARMUP {warm_idx}/{total_warm}] ⚠️  Skipped (navigation failed: {type(e).__name__})")
+            print(log_line("WARMUP", device_display_name(self.config), f"url {warm_idx}/{total_warm}", f"Skipped (navigation failed: {type(e).__name__})"))
             return
 
         try:
             if handle_cmp:
                 await self.cmp_handler.handle_consent(page)
 
-            waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
+            waiter = ReadinessWaiter(
+                timeout=self.config.get("prebid_ready_timeout", 10),
+                require_hero_on_video=(self.config.get("geo", "uk").lower() != "us"),
+                device=device_display_name(self.config),
+            )
             await waiter.wait_for_prebid_and_gpt(page)
 
             await page.evaluate("""
@@ -530,10 +524,10 @@ class TestFramework:
                 }
             """)
         except Exception as e:
-            print(f"[WARMUP {warm_idx}/{total_warm}] ⚠️  Partial warmup (post-nav error: {type(e).__name__})")
+            print(log_line("WARMUP", device_display_name(self.config), f"url {warm_idx}/{total_warm}", f"Partial (post-nav error: {type(e).__name__})"))
             return
 
-        print(f"[WARMUP {warm_idx}/{total_warm}] done")
+        print(log_line("WARMUP", device_display_name(self.config), f"url {warm_idx}/{total_warm}", "done"))
 
     # ------------- Per-URL runner -------------
 
@@ -552,7 +546,8 @@ class TestFramework:
 
         Logs are printed directly to stdout so you can see activity as it happens.
         """
-        print(f"[{url_idx}/{total_urls}] Processing {url}")
+        device = device_display_name(self.config)
+        print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", url))
 
         # Inject credentials for UAT/DEV/feature branches/staging if needed
         auth_url = self._add_basic_auth_to_url(url)
@@ -561,7 +556,7 @@ class TestFramework:
         await self._set_context_cookies(page, auth_url)
 
         # Navigate & wait for DOM
-        nav_timeout = int(self.config.get("timeout", 30000))
+        nav_timeout = int(self.config.get("timeout", 30)) * 1000
         await page.goto(auth_url, wait_until="domcontentloaded", timeout=nav_timeout)
 
         # CMP only once per session / first URL (per mode)
@@ -569,7 +564,7 @@ class TestFramework:
             await self.cmp_handler.handle_consent(page)
 
         # Wait until pbjs & GPT are fully ready
-        waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10))
+        waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10), device=device_display_name(self.config))
         await waiter.wait_for_prebid_and_gpt(page)
 
         # Scroll through the full page to trigger lazy-loaded ad slots,
@@ -601,7 +596,7 @@ class TestFramework:
 
         # Skip bulletin pages — ad rules not defined yet.
         if "bulletin" in (url or "").lower():
-            print(f"[{url_idx}/{total_urls}] ⏭️  Skipping bulletin page: {url}")
+            print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping bulletin page"))
             return _skipped_results("Bulletin page — ad rules not defined; skipping all tests.")
 
         # Skip premium pages — not monetised, no ads to test.
@@ -609,23 +604,22 @@ class TestFramework:
             "() => !!document.querySelector('path[fill=\"#337E81\"]')"
         )
         if is_premium:
-            print(f"[{url_idx}/{total_urls}] ⏭️  Skipping premium page: {url}")
+            print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping premium page"))
             return _skipped_results("Premium page — not monetised; skipping all tests.")
 
         # Detect page type from GPT key-values (with small polling window)
         page_type_norm = await self._detect_page_type(page)
-        print(f"[{url_idx}/{total_urls}] 🧩 Detected page type: {page_type_norm}")
+        print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", f"page type: {page_type_norm}"))
 
         # Detect locale from Locale cookie (UK / US)
         locale = await self._detect_locale(page)
-        print(f"[{url_idx}/{total_urls}] 🗺️  Detected locale: {locale}")
+        print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", f"locale: {locale}"))
 
         # ---- GLOBAL CONTEXT TRACE (one line per URL; very useful for bidder presence debugging) ----
         liveblog = await self._detect_liveblog(page)
         db_page_type = self._map_pagetype_to_db(page_type_norm, liveblog)
         env = self._env_from_url(auth_url or url)
-        device = device_label(self.config)
-        geo = (locale or "UK").strip().lower()
+        geo = (self.config.get("geo") or locale or "UK").strip().lower()
         publisher = self._publisher_from_url(auth_url or url)
         counts = await self._get_event_store_counts(page)
 
@@ -643,15 +637,15 @@ class TestFramework:
             "videoBidReq": counts.get("videoBidReq", 0),
         }
 
-        tag = f"[{url_idx}/{total_urls}]"
-        print(
-            f"{tag} 🔎 {publisher}  env={env}  device={device}  geo={geo}"
+        url_tag = f"url {url_idx}/{total_urls}"
+        print(log_line("TESTING", device, url_tag,
+            f"{publisher}  env={env}  geo={geo}"
             f"  page={page_type_norm}  db_page={db_page_type}  liveblog={(liveblog or 'n/a')}"
-        )
-        print(
-            f"{tag}    events → display={counts.get('displayEvents')}  video={counts.get('videoEvents')}"
+        ))
+        print(log_line("TESTING", device, url_tag,
+            f"events: display={counts.get('displayEvents')}  video={counts.get('videoEvents')}"
             f"  bidReq display={counts.get('displayBidReq')}  video={counts.get('videoBidReq')}"
-        )
+        ))
 
         # 🔸 Apply site test plan (inherit-all, then exclude by page type)
         # IMPORTANT: site plans are keyed by publisher, not by active_site variants
@@ -705,41 +699,26 @@ class TestFramework:
             print(prefix + "running...")
 
         def _progress_end(prefix: str, status: str) -> None:
-            """
-            Print final test status, then add spacing so the next test block doesn't
-            visually run into this one.
-
-            Toggle with config["trace_spacing_between_tests"] (default: True).
-            """
             line = prefix + status
-
-            # Default ON
-            spacing = bool(self.config.get("trace_spacing_between_tests", True))
-
             if inline:
                 try:
                     sys.stdout.write("\r\033[2K" + line + "\n")
                     sys.stdout.flush()
-                    if spacing:
-                        # One extra blank line => visible separation between tests
-                        sys.stdout.write("\n")
-                        sys.stdout.flush()
                     return
                 except Exception:
                     pass
-
             print(line)
-            if spacing:
-                print()  # blank line between tests
 
         # Run each test for this URL (fresh instance per class)
+        arrow_indent = log_arrow_indent("TESTING", device, f"url {url_idx}/{total_urls}")
+        test_name_w = max((len(_class_name(c)) for c in run_classes), default=30)
         for cls in run_classes:
             test_name = _class_name(cls)
             test = cls(self.config)
 
             test.locale = locale
 
-            prefix = f"[{url_idx}/{total_urls}]   {test_name}: "
+            prefix = log_line("TESTING", device, f"url {url_idx}/{total_urls}", f"  {test_name.ljust(test_name_w)}: ")
             _progress_start(prefix)
 
             try:
@@ -764,12 +743,12 @@ class TestFramework:
                     msgs = result.errors if result.errors else result.warnings
                     if msgs:
                         first = str(msgs[0]).strip().splitlines()[0][:120]
-                        print(dim(f"{'':>{len(prefix)}}  ↳ {first}"))
+                        print(dim(f"{'':>{arrow_indent}}↳ {first}"))
                 elif result.state == TestState.SKIPPED:
                     msgs = result.warnings if result.warnings else result.errors
                     if msgs:
                         first = str(msgs[0]).strip().splitlines()[0][:120]
-                        print(dim(f"{'':>{len(prefix)}}  ↳ {first}"))
+                        print(dim(f"{'':>{arrow_indent}}↳ {first}"))
 
             except Exception as e:
                 err_result = TestResult(test_name)
@@ -790,10 +769,10 @@ class TestFramework:
 
                 url_results.append(err_result)
                 _progress_end(prefix, colour_state("error"))
-                print(dim(f"{'':>{len(prefix)}}  ↳ {str(e).strip().splitlines()[0][:120]}"))
+                print(dim(f"{'':>{arrow_indent}}↳ {str(e).strip().splitlines()[0][:120]}"))
 
         left = total_urls - url_idx
-        print(f"[{url_idx}/{total_urls}] done, {left} left")
+        print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", f"done, {left} left"))
 
         return url_results
 
@@ -825,21 +804,21 @@ class TestFramework:
         test_classes = env_classes + non_env
 
         if not test_classes:
-            print("No tests found to run")
+            print(log_line("TESTS", message="No tests found to run"))
             return results
 
         # Start browser / context
         await self.browser_manager.start()
-        print(f"🛫 Browser launched (device = {device_label(self.config)}, viewport = {self.config.get('viewport')})")
+        print(log_line("SETUP", device_display_name(self.config), message="Browser launched"))
 
         # Get URLs
         selected_urls = await self._get_selected_urls()
         self.selected_urls = list(selected_urls)  # preserve crawl order for matrix
         total_urls = len(selected_urls)
-        print(f"▶️  Starting crawl: {total_urls} URLs (device={device_label(self.config)})")
+        print(log_line("SETUP", device_display_name(self.config), message=f"Crawling {total_urls} URLs ({self.config.get('active_site')})"))
 
         if total_urls == 0:
-            print("⚠️ No URLs found to test (config['urls'] is empty).")
+            print(log_line("CONFIG", message="No URLs found to test (config['urls'] is empty)."))
             await self.browser_manager.close()
             return results
 
@@ -850,7 +829,7 @@ class TestFramework:
         self._warm_page = None
 
         if warmup_pages > 0:
-            print(f"🔥 Warmup phase: loading first {warmup_pages} URL(s) without running tests")
+            print(log_line("WARMUP", device_display_name(self.config), message=f"Loading first {warmup_pages} URL(s)"))
             self._warm_page = await self.browser_manager.new_page()
             for w_idx, w_url in enumerate(selected_urls[:warmup_pages], start=1):
                 await self._warmup_url(
@@ -860,15 +839,13 @@ class TestFramework:
                     total_warm=warmup_pages,
                     handle_cmp=(w_idx == 1),
                 )
-            print("🔥 Warmup phase complete.\n")
 
-        parallel = self.config.get("parallel_tests", False)
+        parallel = int(self.config.get("concurrency", 1) or 1) > 1
 
         if not parallel:
             # -------- SINGLE-PAGE, SEQUENTIAL MODE --------
             if self._warm_page is not None:
                 page = self._warm_page
-                print("♻️ Reusing warmup page for main test run")
             else:
                 page = await self.browser_manager.new_page()
 
@@ -889,27 +866,47 @@ class TestFramework:
             concurrency = int(self.config.get("concurrency", 4) or 4)
             semaphore = asyncio.Semaphore(concurrency)
 
+            # Per-URL hard timeout: nav + readiness + generous buffer for test execution.
+            # Prevents a stale BrowserStack session from hanging new_page() indefinitely.
+            _nav_s = float(self.config.get("timeout", 30))
+            _prebid_s = float(self.config.get("prebid_ready_timeout", 20.0))
+            _per_url_timeout = _nav_s + _prebid_s + 120.0
+
             async def run_for_url(url_idx: int, url: str) -> List[TestResult]:
                 async with semaphore:
-                    page = await self.browser_manager.new_page()
+                    page = None
                     try:
-                        return await self._run_tests_for_url(
-                            page=page,
-                            url=url,
-                            test_classes=test_classes,
-                            url_idx=url_idx,
-                            total_urls=total_urls,
-                            handle_cmp=(url_idx == 1 and warmup_pages == 0),
-                            explicit_tests=explicit_tests,
+                        page = await asyncio.wait_for(
+                            self.browser_manager.new_page(),
+                            timeout=_nav_s + 10.0,
                         )
+                        return await asyncio.wait_for(
+                            self._run_tests_for_url(
+                                page=page,
+                                url=url,
+                                test_classes=test_classes,
+                                url_idx=url_idx,
+                                total_urls=total_urls,
+                                handle_cmp=(url_idx == 1 and warmup_pages == 0),
+                                explicit_tests=explicit_tests,
+                            ),
+                            timeout=_per_url_timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        print(
+                            log_line("TESTING", device_display_name(self.config), f"url {url_idx}/{total_urls}",
+                                     f"URL worker timed out after {_per_url_timeout:.0f}s")
+                        )
+                        return []
                     except Exception as e:
-                        print(f"[{url_idx}/{total_urls}] ⚠️  Worker error for {url}: {e}")
+                        print(log_line("TESTING", device_display_name(self.config), f"url {url_idx}/{total_urls}", f"Worker error: {e}"))
                         return []
                     finally:
-                        try:
-                            await page.close()
-                        except Exception:
-                            pass
+                        if page is not None:
+                            try:
+                                await page.close()
+                            except Exception:
+                                pass
 
             tasks = [asyncio.create_task(run_for_url(idx, url)) for idx, url in enumerate(selected_urls, start=1)]
             url_results_lists = await asyncio.gather(*tasks, return_exceptions=False)

@@ -40,6 +40,16 @@ def device_label(config: dict) -> str:
     return "mobile"
 
 
+def device_display_name(config: dict) -> str:
+    """Return the human-readable device name for log output.
+
+    Uses config['device_name'] (e.g. 'iPhone 15 Pro', 'Pixel 7') when set,
+    falls back to the viewport-derived label.
+    """
+    name = config.get("device_name", "")
+    return name if name else device_label(config)
+
+
 def bidder_lookup_device(device: str) -> str:
     """Tablets share the mobile bidder set — always query mobile rows."""
     return "mobile" if device == "tablet" else device
