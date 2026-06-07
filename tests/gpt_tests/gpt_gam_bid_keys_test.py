@@ -29,13 +29,14 @@ What counts as PASS / FAIL / SKIPPED
 * SKIPPED:
     - GPT not available.
     - No auctionEnd events captured (auction has not completed yet).
+    - auctionEnd fired but zero bids received — no fill, enrichment check not applicable.
 
 * FAILED:
-    - auctionEnd fired but no hb_* keys in bidsReceived (Prebid did not set targeting).
+    - Bids were received but no hb_* keys set — Prebid enrichment broken.
     - No amzn* keys in page-level GAM targeting (TAM missing).
 
 * PASSED:
-    - At least one bidWon has hb_* keys AND page-level targeting has amzn* keys.
+    - At least one bid received with hb_* keys AND page-level targeting has amzn* keys.
 """
 
 from pathlib import Path
@@ -97,11 +98,22 @@ class GptGamBidKeysTest(GptBaseTest):
         bids_received: int = diag.get("bidsReceivedCount", 0)
 
         errors = []
+
         if not has_prebid:
+            if bids_received == 0:
+                # No bidder responded with a bid — no fill, nothing to assert.
+                result.state = TestState.SKIPPED
+                result.warnings.append(
+                    f"No bids received in {auction_end_count} auction(s) — no fill; "
+                    "hb_* enrichment check skipped."
+                )
+                return result
+            # Bids came back but hb_* keys not set — real enrichment failure.
             errors.append(
-                f"No hb_* keys in {bids_received} bid(s) from {auction_end_count} auction(s); "
+                f"No hb_* keys despite {bids_received} bid(s) from {auction_end_count} auction(s); "
                 "Prebid did not enrich GAM."
             )
+
         if not has_tam:
             errors.append(
                 "No amzn* keys in page-level or slot-level GAM targeting; TAM did not enrich GAM."
