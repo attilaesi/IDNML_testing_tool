@@ -208,6 +208,25 @@ class ReadinessWaiter:
                 if base_ready:
                     if base_became_ready_at is None:
                         base_became_ready_at = elapsed
+                        # Scroll to trigger the video player as soon as display is ready.
+                        # The hero player is lazy-loaded and won't fire its Prebid auction
+                        # until it enters the viewport.
+                        if last_status.get("isVideoPage") and self.require_hero_on_video:
+                            try:
+                                await page.evaluate("""
+                                    () => {
+                                        const target = (
+                                            document.querySelector('.hero-video') ||
+                                            document.querySelector('[class*="hero"]') ||
+                                            document.querySelector('video') ||
+                                            document.body
+                                        );
+                                        target.scrollIntoView({behavior: 'smooth', block: 'center'});
+                                        window.scrollBy(0, 600);
+                                    }
+                                """)
+                            except Exception:
+                                pass
                     if last_status.get("isVideoPage") and self.require_hero_on_video:
                         if last_status.get("heroAuctionStarted"):
                             print(log_line("READINESS", self.device, self.url_tag,
