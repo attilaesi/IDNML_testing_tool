@@ -10,11 +10,13 @@ class ReadinessWaiter:
     Prebid does not run).
     """
 
-    def __init__(self, timeout: float = 10.0, poll_interval: float = 0.5, require_hero_on_video: bool = True, device: str = ""):
+    def __init__(self, timeout: float = 10.0, poll_interval: float = 0.5, require_hero_on_video: bool = True, device: str = "", url_tag: str = "", hero_player_timeout: float = 30.0):
         self.timeout = timeout
         self.poll_interval = poll_interval
         self.require_hero_on_video = require_hero_on_video
         self.device = device
+        self.url_tag = url_tag
+        self.hero_player_timeout = hero_player_timeout  # extra window for hero_player after display is ready
 
     async def wait_for_prebid_and_gpt(self, page):
         hero_adunit = "hero_player"
@@ -177,8 +179,19 @@ class ReadinessWaiter:
 
         elapsed = 0.0
         last_status = None
+        base_became_ready_at = None  # tracks when display/GPT first became ready
 
-        while elapsed < self.timeout:
+        while True:
+            # Phase 1: wait up to self.timeout for base (display) readiness.
+            # Phase 2: once base is ready on a video page, allow hero_player_timeout
+            #          additional seconds — video player initialises later than display.
+            if base_became_ready_at is None:
+                if elapsed >= self.timeout:
+                    break
+            else:
+                if (elapsed - base_became_ready_at) >= self.hero_player_timeout:
+                    break
+
             try:
                 status = await page.evaluate(js_condition)
                 last_status = status or {}
@@ -193,24 +206,30 @@ class ReadinessWaiter:
 
                 # On video pages, additionally require hero auction (unless geo skips it)
                 if base_ready:
+                    if base_became_ready_at is None:
+                        base_became_ready_at = elapsed
                     if last_status.get("isVideoPage") and self.require_hero_on_video:
                         if last_status.get("heroAuctionStarted"):
-                            print(
-                                "✅ pbjs & GPT ready, auction started, hero_player auction started: "
+                            print(log_line("READINESS", self.device, self.url_tag,
+                                message=(
+                                    f"pbjs & GPT ready, auction started, hero_player auction started: "
+                                    f"{last_status.get('bidderCount', 0)} bidders after {elapsed:.1f}s "
+                                    f"(pageType={last_status.get('pageType')}, "
+                                    f"displayEvents={last_status.get('displayStoreLen', 0)}, "
+                                    f"videoEvents={last_status.get('videoStoreLen', 0)})"
+                                )
+                            ))
+                            return True
+                    else:
+                        print(log_line("READINESS", self.device, self.url_tag,
+                            message=(
+                                f"pbjs & GPT ready, auction started: "
                                 f"{last_status.get('bidderCount', 0)} bidders after {elapsed:.1f}s "
                                 f"(pageType={last_status.get('pageType')}, "
                                 f"displayEvents={last_status.get('displayStoreLen', 0)}, "
                                 f"videoEvents={last_status.get('videoStoreLen', 0)})"
                             )
-                            return True
-                    else:
-                        print(
-                            "✅ pbjs & GPT ready, auction started: "
-                            f"{last_status.get('bidderCount', 0)} bidders after {elapsed:.1f}s "
-                            f"(pageType={last_status.get('pageType')}, "
-                            f"displayEvents={last_status.get('displayStoreLen', 0)}, "
-                            f"videoEvents={last_status.get('videoStoreLen', 0)})"
-                        )
+                        ))
                         return True
             except Exception:
                 pass
@@ -231,8 +250,8 @@ class ReadinessWaiter:
             display_len = last_status.get("displayStoreLen")
             video_len = last_status.get("videoStoreLen")
 
-        print(log_line("READINESS", self.device,
-            message=f"Timeout after {self.timeout}s "
+        print(log_line("READINESS", self.device, self.url_tag,
+            message=f"Timeout after {elapsed:.1f}s "
                     f"(pageType={pt}, isVideoPage={is_video}, heroAuctionStarted={hero_started}, "
                     f"displayEvents={display_len}, videoEvents={video_len})"
         ))

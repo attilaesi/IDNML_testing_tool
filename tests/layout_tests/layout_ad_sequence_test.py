@@ -186,4 +186,12 @@ class LayoutAdSequenceTest(BaseTest):
         result.metadata["mpuSequence"] = mpu_sequence
         result.metadata["gpt_slot_ids"] = sorted(gpt_slot_ids)
 
+        # Scalar attributes surfaced in the crawler sheet report
+        result.metadata["rule_label"] = rule_label
+        result.metadata["paragraphs"] = paragraphs
+        result.metadata["slots_passed"] = len(passes)
+        result.metadata["slots_failed"] = len(failures)
+        result.metadata["slots_warned"] = len(near_misses)
+        result.metadata["slots_skipped"] = len(skipped)
+
         return result

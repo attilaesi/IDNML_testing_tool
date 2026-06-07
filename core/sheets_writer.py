@@ -1115,8 +1115,21 @@ class SheetsWriter:
         ws = spreadsheet.sheet1
         ws.update_title("results")
 
+        # ── Discover extra scalar metadata columns across all results ─────────
+        _SKIP_META = {"page_type", "layout_tag", "rows", "ruleSetName", "mpuSequence", "gpt_slot_ids"}
+        _SCALAR = (str, int, float, bool)
+        extra_keys: list = []
+        for r in results:
+            meta_d = r.metadata if isinstance(r.metadata, dict) else {}
+            for k, v in meta_d.items():
+                if k not in _SKIP_META and k not in extra_keys and isinstance(v, _SCALAR):
+                    extra_keys.append(k)
+
         # ── Build rows ────────────────────────────────────────────────────────
-        headers = ["URL", "Page Type", "Result", "Fail Reason"]
+        fixed_headers = ["URL", "Page Type", "Result"]
+        extra_headers = [k.replace("_", " ").title() for k in extra_keys]
+        headers = fixed_headers + extra_headers + ["Fail Reason"]
+        total_cols = len(headers)
         rows = [headers]
         fmts = []
 
@@ -1131,7 +1144,8 @@ class SheetsWriter:
             state_str = r.state.value if r.state else "unknown"
             msgs = r.errors if r.errors else (r.warnings or [])
             fail_reason = " | ".join(str(m).strip().splitlines()[0] for m in msgs[:3]) if msgs else ""
-            rows.append([r.url or "", page_type, state_str.upper(), fail_reason])
+            extra_vals = [meta_d.get(k, "") for k in extra_keys]
+            rows.append([r.url or "", page_type, state_str.upper()] + extra_vals + [fail_reason])
 
             bg = _cell_color(r.state)
             color = Color(red=bg[0], green=bg[1], blue=bg[2])
@@ -1142,7 +1156,8 @@ class SheetsWriter:
         # Header formatting
         header_bg = _PALETTE["header_dk"]
         hdr_color = Color(red=header_bg[0], green=header_bg[1], blue=header_bg[2])
-        fmts.append(("A1:D1", CellFormat(
+        last_col = _a1(1, total_cols)
+        fmts.append((f"A1:{last_col}", CellFormat(
             backgroundColor=hdr_color,
             textFormat=TextFormat(bold=True, foregroundColor=Color(1, 1, 1)),
         )))
@@ -1151,7 +1166,11 @@ class SheetsWriter:
             format_cell_ranges(ws, fmts)
 
         set_frozen(ws, rows=1)
-        self._set_column_widths(ws, {0: 520, 1: 100, 2: 80, 3: 420})
+        col_widths = {0: 520, 1: 100, 2: 80}
+        for j in range(len(extra_keys)):
+            col_widths[3 + j] = 110
+        col_widths[3 + len(extra_keys)] = 420   # Fail Reason
+        self._set_column_widths(ws, col_widths)
 
         url = f"https://docs.google.com/spreadsheets/d/{spreadsheet.id}"
         print(f"Google Sheet: {url}")

@@ -504,8 +504,9 @@ class TestFramework:
 
             waiter = ReadinessWaiter(
                 timeout=self.config.get("prebid_ready_timeout", 10),
-                require_hero_on_video=(self.config.get("geo", "uk").lower() != "us"),
+                require_hero_on_video=False,  # warmup only primes the browser; don't block on hero
                 device=device_display_name(self.config),
+                url_tag=f"url {warm_idx}/{total_warm}",
             )
             await waiter.wait_for_prebid_and_gpt(page)
 
@@ -564,7 +565,13 @@ class TestFramework:
             await self.cmp_handler.handle_consent(page)
 
         # Wait until pbjs & GPT are fully ready
-        waiter = ReadinessWaiter(timeout=self.config.get("prebid_ready_timeout", 10), device=device_display_name(self.config))
+        waiter = ReadinessWaiter(
+            timeout=self.config.get("prebid_ready_timeout", 10),
+            hero_player_timeout=self.config.get("hero_player_timeout", 30),
+            require_hero_on_video=(self.config.get("geo", "uk").lower() != "us"),
+            device=device_display_name(self.config),
+            url_tag=f"url {url_idx}/{total_urls}",
+        )
         await waiter.wait_for_prebid_and_gpt(page)
 
         # Scroll through the full page to trigger lazy-loaded ad slots,
@@ -597,18 +604,50 @@ class TestFramework:
         # Skip bulletin pages — ad rules not defined yet.
         if "bulletin" in (url or "").lower():
             print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping bulletin page"))
-            return _skipped_results("Bulletin page — ad rules not defined; skipping all tests.")
+            skipped = _skipped_results("Bulletin page — ad rules not defined; skipping all tests.")
+            for r in skipped:
+                r.metadata.setdefault("page_type", "bulletin")
+            return skipped
+
+        # Skip /tv/ pages — separate ad setup, not covered by these tests.
+        if "/tv/" in (url or "").lower():
+            print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping TV page"))
+            skipped = _skipped_results("TV page — separate ad setup; skipping all tests.")
+            for r in skipped:
+                r.metadata.setdefault("page_type", "tv")
+            return skipped
+
+        # Skip IndyBest pages — affiliate/commerce content, different ad setup.
+        if "indybest" in (url or "").lower():
+            print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping IndyBest page"))
+            skipped = _skipped_results("IndyBest page — affiliate content; skipping all tests.")
+            for r in skipped:
+                r.metadata.setdefault("page_type", "indybest")
+            return skipped
 
         # Skip premium pages — not monetised, no ads to test.
-        is_premium = await page.evaluate(
-            "() => !!document.querySelector('path[fill=\"#337E81\"]')"
-        )
+        # data-is-premium="true" is the canonical DOM marker; the SVG fill is a fallback.
+        is_premium = await page.evaluate("""
+            () => !!(
+                document.querySelector('[data-is-premium="true"]') ||
+                document.querySelector('.article-premium') ||
+                document.querySelector('path[fill="#337E81"]')
+            )
+        """)
         if is_premium:
             print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping premium page"))
-            return _skipped_results("Premium page — not monetised; skipping all tests.")
+            skipped = _skipped_results("Premium page — not monetised; skipping all tests.")
+            for r in skipped:
+                r.metadata.setdefault("page_type", "premium")
+            return skipped
 
-        # Detect page type from GPT key-values (with small polling window)
-        page_type_norm = await self._detect_page_type(page)
+        # Detect page type and liveblog flag together — liveblog changes the effective page type
+        gpt_page_type = await self._detect_page_type(page)
+        liveblog = await self._detect_liveblog(page)
+        if (liveblog or "").strip().lower() == "y" and gpt_page_type in ("video", "image"):
+            page_type_norm = f"blog/{gpt_page_type}"
+        else:
+            page_type_norm = gpt_page_type
         print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", f"page type: {page_type_norm}"))
 
         # Detect locale from Locale cookie (UK / US)
@@ -616,7 +655,6 @@ class TestFramework:
         print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", f"locale: {locale}"))
 
         # ---- GLOBAL CONTEXT TRACE (one line per URL; very useful for bidder presence debugging) ----
-        liveblog = await self._detect_liveblog(page)
         db_page_type = self._map_pagetype_to_db(page_type_norm, liveblog)
         env = self._env_from_url(auth_url or url)
         geo = (self.config.get("geo") or locale or "UK").strip().lower()
@@ -628,7 +666,7 @@ class TestFramework:
             "env": env,
             "device": device,
             "geo": geo,
-            "gpt_page_type": page_type_norm,
+            "gpt_page_type": gpt_page_type,
             "liveblog": (liveblog or "n/a"),
             "db_page_type": db_page_type,
             "displayEvents": counts.get("displayEvents", 0),

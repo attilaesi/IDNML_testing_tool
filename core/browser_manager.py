@@ -2,7 +2,26 @@ import asyncio
 import json
 import os
 import urllib.parse
+import urllib.request
 from typing import Optional
+
+
+def _detect_system_proxy() -> str:
+    """Return the HTTPS system proxy server string, or '' if none is configured.
+
+    Reads macOS/Linux system proxy settings so that headless Chromium routes
+    traffic through an active VPN or corporate proxy automatically.
+    Explicit env vars (HTTPS_PROXY, https_proxy, ALL_PROXY) take priority.
+    """
+    for var in ("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"):
+        val = os.getenv(var, "").strip()
+        if val:
+            return val
+    try:
+        proxies = urllib.request.getproxies()
+        return proxies.get("https") or proxies.get("http") or ""
+    except Exception:
+        return ""
 
 from playwright.async_api import async_playwright
 
@@ -50,7 +69,19 @@ class BrowserManager:
             browser_type = self.playwright.chromium
             headless = bool(self.config.get("headless", True))
             slow_mo = int(self.config.get("slow_mo", 0) or 0)
-            self.browser = await browser_type.launch(headless=headless, slow_mo=slow_mo)
+
+            # Auto-detect system proxy so Chromium routes through VPN correctly.
+            # Explicit PLAYWRIGHT_PROXY env var overrides system detection.
+            launch_proxy = None
+            proxy_server = os.getenv("PLAYWRIGHT_PROXY") or _detect_system_proxy()
+            if proxy_server:
+                launch_proxy = {"server": proxy_server}
+
+            self.browser = await browser_type.launch(
+                headless=headless,
+                slow_mo=slow_mo,
+                proxy=launch_proxy,
+            )
 
         # ---------------------------------------------------------------------
         # IMPORTANT: Basic auth for pre-prod MUST be done via Playwright
