@@ -52,6 +52,11 @@ async def main():
         action="store_true",
         help="Open a visible browser window instead of running headless.",
     )
+    parser.add_argument(
+        "--nosheet",
+        action="store_true",
+        help="Skip Google Sheets output at the end of the run.",
+    )
     args = parser.parse_args()
 
     cfg = TestConfig()
@@ -106,16 +111,19 @@ async def main():
         regression = await sw.fetch_regression_diff(run_id, publisher, environment, geo)
 
     # Google Sheets output (single-device run — one device tab + Summary)
-    if bool(CONFIG.get("sheets_enabled", False)) and results:
+    if bool(CONFIG.get("sheets_enabled", False)) and results and not args.nosheet:
         from core.sheets_writer import SheetsWriter
         from core.url_context_helpers import env_from_url
+        from core.supabase_writer import geo_from_results as _geo_from_results
         dev_key = CONFIG.get("device_key") or device_label(CONFIG)
         dev_name = CONFIG.get("device_name", "")
+        _geo = (CONFIG.get("geo") or "").upper() or _geo_from_results(results)
         run_meta = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "site": CONFIG.get("active_site", ""),
             "env": env_from_url(CONFIG.get("site_url", "")),
-            "geo": (CONFIG.get("geo") or "").upper(),
+            "geo": _geo,
+            "runner": "BrowserStack" if args.browserstack else "Local Playwright",
             "device_names": {dev_key: dev_name},
             "regression": regression,
         }

@@ -2,24 +2,56 @@
 importScripts("shared/validators.js");
 
 // ---------------------------------------------------------------------------
+// IMA capture — intercepts hero_player GAM video ad requests at the network
+// level via webRequest. Reliable regardless of frame or execution context.
+// ---------------------------------------------------------------------------
+const _imaCaptures = new Map(); // tabId → { cust_params }
+
+const _IMA_URL_FILTER = {
+  urls: [
+    "*://pubads.g.doubleclick.net/gampad/ads*",
+    "*://securepubads.g.doubleclick.net/gampad/ads*",
+    "*://pagead2.googlesyndication.com/gampad/ads*",
+    "*://pubads.g.doubleclick.net/gampad/live/ads*",
+    "*://securepubads.g.doubleclick.net/gampad/live/ads*",
+    "*://pagead2.googlesyndication.com/gampad/live/ads*",
+  ],
+};
+
+chrome.webRequest.onBeforeRequest.addListener((details) => {
+  try {
+    const _IMA_AD_UNITS = ["hero_player", "primis_hero_player_DIRECT"];
+    if (!_IMA_AD_UNITS.some(u => details.url.indexOf(u) !== -1)) return;
+    const u = new URL(details.url);
+    if (u.searchParams.get("env") !== "vp") return;
+    const raw = u.searchParams.get("cust_params");
+    if (!raw) return;
+    const params = {};
+    new URLSearchParams(raw).forEach((v, k) => { params[k] = v; });
+    _imaCaptures.set(details.tabId, { cust_params: params });
+  } catch (e) {}
+}, _IMA_URL_FILTER);
+
+
+// ---------------------------------------------------------------------------
 // Test files to inject (order matters — warnings_init last before runner)
 // ---------------------------------------------------------------------------
 const TEST_FILES = [
   "js/pbjs_environment.js",
   "js/pbjs_display_bidder_presence.js",
   "js/pbjs_video_bidder_presence.js",
-  "js/pbjs_auction_activity.js",
+  "js/pbjs_display_auction_activity.js",
   "js/pbjs_adunit_configuration.js",
   "js/pbjs_consent_integration.js",
   "js/pbjs_identity_modules.js",
-  "js/pbjs_price_floors_display.js",
-  "js/pbjs_price_floors_video.js",
-  "js/pbjs_pubcid_presence_display.js",
-  "js/pbjs_pubcid_presence_video.js",
+  "js/pbjs_display_price_floors.js",
+  "js/pbjs_video_price_floors.js",
+  "js/pbjs_display_pubcid_presence.js",
+  "js/pbjs_video_pubcid_presence.js",
   "js/pbjs_timeout_config.js",
-  "js/pbjs_hero_player_placement.js",
-  "js/pbjs_mantis_signals_bid.js",
-  "js/pbjs_permutive_signals_bid.js",
+  "js/pbjs_video_hero_player_placement.js",
+  "js/pbjs_display_mantis_signals_bid.js",
+  "js/pbjs_display_permutive_signals_bid.js",
   "js/gpt_page_type.js",
   "js/gpt_mantis.js",
   "js/gpt_mantis_context.js",
@@ -44,13 +76,27 @@ const TEST_FILES = [
   "js/gpt_untested_keys.js",
   "js/layout_ad_sequence.js",
   "js/env_is_mobile_or_tablet.js",
+  "js/ima_strategy_player.js",
+  "js/ima_page_type.js",
+  "js/ima_category1.js",
+  "js/ima_category2.js",
+  "js/ima_mantis.js",
+  "js/ima_mantis_context.js",
+  "js/ima_permutive.js",
+  "js/ima_topictags.js",
+  "js/ima_liveblog.js",
+  "js/ima_video_id.js",
+  "js/ima_adpos.js",
+  "js/ima_bsc.js",
+  "js/ima_abs.js",
 ];
 
 // ---------------------------------------------------------------------------
 // Readiness poller — injected into the page. Self-contained (no closures).
 // Phase 1: wait for pbjs + display events (up to 15s).
-// Phase 2: if pageType === "video", also wait for video events (up to 15s
-//          extra) — covers click-to-play and in-view autoplay players.
+// Phase 2: if pageType === "video", also wait for video events (up to 15s).
+// Returns "ready_video" on video pages so background.js knows to wait for IMA.
+// IMA capture itself is handled by webRequest in the service worker.
 // ---------------------------------------------------------------------------
 function pbjsReadinessPoller() {
   return new Promise((resolve) => {
@@ -72,7 +118,7 @@ function pbjsReadinessPoller() {
     function waitVideo() {
       var vs = Date.now();
       function poll() {
-        if (hasVideo()) return resolve("ready");
+        if (hasVideo()) return resolve("ready_video");
         if (Date.now() - vs > MAX_VIDEO) return resolve("timeout_video");
         setTimeout(poll, INTERVAL);
       }
@@ -152,10 +198,27 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   try {
     // Wait for Prebid to actually fire before running tests
-    await chrome.scripting.executeScript({
+    const [pollerResult] = await chrome.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
       func: pbjsReadinessPoller,
+    });
+
+    // On video pages, wait up to 10s for the IMA request to be captured
+    if (pollerResult?.result === "ready_video") {
+      const imaDeadline = Date.now() + 10000;
+      while (!_imaCaptures.has(tabId) && Date.now() < imaDeadline) {
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    }
+
+    // If we captured an IMA request, inject it into the page before tests run
+    const imaData = _imaCaptures.get(tabId) ?? null;
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: (data) => { window.__imaAdRequest = data; },
+      args: [imaData],
     });
 
     // Inject all test definition files
@@ -196,9 +259,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
-// Clear stored results when a tab navigates away (new URL loading)
+// Clear stored results and IMA capture when a tab navigates away
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (changeInfo.status !== "loading") return;
+  _imaCaptures.delete(tabId);
   await chrome.storage.local.remove(`tab_${tabId}`);
   chrome.action.setBadgeText({ tabId, text: "" });
 });
@@ -206,5 +270,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
 // Clean up when tab closes
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.local.remove(`tab_${tabId}`);
+  _imaCaptures.delete(tabId);
+});
+
+// Allow popup to request IMA capture data for re-runs
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "getImaCapture") {
+    sendResponse(_imaCaptures.get(msg.tabId) ?? null);
+  }
+  return false;
 });
 

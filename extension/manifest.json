@@ -3,7 +3,7 @@
   "name": "Ad Inspector",
   "version": "2.0",
   "description": "Auto-runs ad quality tests on every page load",
-  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "webRequest"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",

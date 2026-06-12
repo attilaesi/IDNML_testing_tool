@@ -29,11 +29,11 @@ EXT_JS = REPO_ROOT / "extension" / "js"
 
 # Parameterised replacements: stem -> {placeholder: value}
 REPLACEMENTS = {
-    "pbjs_hero_player_placement": {
+    "pbjs_video_hero_player_placement": {
         "__EXPECTED_PLACEMENT__": "1",
         "__HERO_ADUNIT_CODE__": "hero_player",
     },
-    "pbjs_permutive_signals_bid": {
+    "pbjs_display_permutive_signals_bid": {
         "__REQUIRED_BIDDERS__": json.dumps(["ix", "rubicon", "msft", "pubmatic"]),
     },
 }

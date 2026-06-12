@@ -23,7 +23,7 @@ What counts as PASS / FAIL / SKIP
 - FAILED: Supabase returns 0 rows for the explicit context (configuration/mapping error).
 - FAILED: expected bidders are present in DB but missing from the observed auction.
 - FAILED: bidders observed in the auction that are not in the expected set.
-- SKIPPED: window.pbjs missing or Supabase not configured.
+- SKIPPED: window.pbjs missing, Supabase not configured, or no bidRequested events captured (no-bid round).
 """
 
 from pathlib import Path
@@ -162,6 +162,11 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         from core.device_helpers import device_label, bidder_lookup_device
         device = bidder_lookup_device(device_label(self.config))
         geo = locale.lower()
+
+        if int(diag.get("bidRequestedEvents") or 0) == 0:
+            result.state = TestState.SKIPPED
+            result.warnings.append("No DISPLAY bidRequested events captured — no-bid round; skipping bidder presence check.")
+            return result
 
         seen: Set[str] = set(diag.get("biddersFromRequests") or [])
 

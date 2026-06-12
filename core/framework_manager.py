@@ -2,9 +2,10 @@
 
 import asyncio
 import sys
+import time
 from collections import defaultdict
 from typing import List, Dict, Type, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs, unquote as _unquote
 
 from core.readiness_waiter import ReadinessWaiter
 from core.base_test import BaseTest, TestResult, TestState, _to_snake
@@ -550,6 +551,15 @@ class TestFramework:
         device = device_display_name(self.config)
         print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", url))
 
+        _url_start = time.monotonic()
+        _video_trace = bool(self.config.get("video_trace"))
+
+        def _vtrace(msg: str) -> None:
+            if not _video_trace:
+                return
+            elapsed = time.monotonic() - _url_start
+            print(f"[VIDEO +{elapsed:.1f}s]  {msg}")
+
         # Inject credentials for UAT/DEV/feature branches/staging if needed
         auth_url = self._add_basic_auth_to_url(url)
 
@@ -558,7 +568,9 @@ class TestFramework:
 
         # Navigate & wait for DOM
         nav_timeout = int(self.config.get("timeout", 30)) * 1000
+        _vtrace(f"navigating to {url}")
         await page.goto(auth_url, wait_until="domcontentloaded", timeout=nav_timeout)
+        _vtrace("DOM content loaded")
 
         # CMP only once per session / first URL (per mode)
         if handle_cmp:
@@ -573,6 +585,7 @@ class TestFramework:
             url_tag=f"url {url_idx}/{total_urls}",
         )
         await waiter.wait_for_prebid_and_gpt(page)
+        _vtrace("Prebid + GPT ready")
 
         # Scroll through the full page to trigger lazy-loaded ad slots,
         # then return to top before tests run.
@@ -590,6 +603,11 @@ class TestFramework:
                 window.scrollTo(0, 0);
             }
         """)
+        _vtrace("page scroll complete — returned to top")
+
+        # Reset IMA state for this URL — prevents stale data from a previous URL
+        # being read if the player never fires on this one.
+        await page.evaluate("window.__imaAdRequest = null;")
 
         def _skipped_results(reason: str) -> List[TestResult]:
             results = []
@@ -609,10 +627,13 @@ class TestFramework:
                 r.metadata.setdefault("page_type", "bulletin")
             return skipped
 
-        # Skip /tv/ pages — separate ad setup, not covered by these tests.
-        if "/tv/" in (url or "").lower():
-            print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping TV page"))
-            skipped = _skipped_results("TV page — separate ad setup; skipping all tests.")
+        # Skip the TV hub page (/tv root) — separate ad setup, not covered by these tests.
+        # Articles that happen to have /tv/ in their path (e.g. /arts-entertainment/tv/reviews/...)
+        # are regular articles and should run normally.
+        _url_path = urlparse(url or "").path.rstrip("/").lower()
+        if _url_path == "/tv":
+            print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", "Skipping TV hub page"))
+            skipped = _skipped_results("TV hub page — separate ad setup; skipping all tests.")
             for r in skipped:
                 r.metadata.setdefault("page_type", "tv")
             return skipped
@@ -685,7 +706,108 @@ class TestFramework:
             f"  bidReq display={counts.get('displayBidReq')}  video={counts.get('videoBidReq')}"
         ))
 
-        # 🔸 Apply site test plan (inherit-all, then exclude by page type)
+        # ---- Video page setup (runs ONCE per URL, before any IMA tests) ----
+        # Registers the IMA network listener, scrolls to the inline player, and
+        # clicks play — so all IMA tests start polling with the request already
+        # in flight rather than each test independently attempting the click.
+        _IMA_ENDPOINTS = (
+            'https://pubads.g.doubleclick.net/gampad/ads',
+            'https://securepubads.g.doubleclick.net/gampad/ads',
+            'https://pagead2.googlesyndication.com/gampad/ads',
+            'https://pubads.g.doubleclick.net/gampad/live/ads',
+            'https://securepubads.g.doubleclick.net/gampad/live/ads',
+            'https://pagead2.googlesyndication.com/gampad/live/ads',
+        )
+        _IMA_AD_UNITS = ('hero_player', 'primis_hero_player_DIRECT')
+
+        _ima_on_request = None  # keep reference so we can remove it after tests
+
+        if gpt_page_type in ("video",) or "video" in page_type_norm:
+            _vtrace(f"video page detected (page_type={page_type_norm}) — registering IMA listener")
+
+            async def _ima_on_request(request):
+                req_url = request.url
+                if not any(unit in req_url for unit in _IMA_AD_UNITS):
+                    return
+                if not any(req_url.startswith(ep) for ep in _IMA_ENDPOINTS):
+                    return
+                try:
+                    parsed = urlparse(req_url)
+                    params = parse_qs(parsed.query, keep_blank_values=True)
+                    if params.get('env', [''])[0] != 'vp':
+                        return
+                    raw = params.get('cust_params', [None])[0]
+                    if not raw:
+                        return
+                    cust = {k: v[0] for k, v in parse_qs(_unquote(raw), keep_blank_values=True).items()}
+                    _vtrace(f"IMA ad request intercepted — {len(cust)} keys: {', '.join(sorted(cust.keys()))}")
+                    # Keep the most complete request (most keys) — early initialisation
+                    # requests can fire with only a handful of keys before full targeting loads.
+                    await page.evaluate(
+                        """data => {
+                            const prev = window.__imaAdRequest;
+                            const prevLen = prev ? Object.keys(prev.cust_params || {}).length : 0;
+                            if (!prev || Object.keys(data.cust_params || {}).length >= prevLen) {
+                                window.__imaAdRequest = data;
+                            }
+                        }""",
+                        {'cust_params': cust},
+                    )
+                    _vtrace("window.__imaAdRequest set on main page")
+                except Exception:
+                    pass
+
+            page.on('request', _ima_on_request)
+            _vtrace("IMA network listener registered")
+
+            try:
+                # Player may be lazy-loaded — poll until it appears or timeout.
+                _player_timeout = 20.0
+                _player_poll = 0.5
+                _player_waited = 0.0
+                has_player = False
+                while _player_waited < _player_timeout:
+                    has_player = await page.evaluate(
+                        "() => !!document.querySelector('.jwplayer:not(.jw-flag-floating)')"
+                    )
+                    if has_player:
+                        break
+                    await asyncio.sleep(_player_poll)
+                    _player_waited += _player_poll
+
+                if has_player:
+                    _vtrace(f"inline JW Player appeared in DOM after {_player_waited:.1f}s — scrolling into view")
+                    await page.evaluate("""() => {
+                        const player = document.querySelector('.jwplayer:not(.jw-flag-floating)');
+                        if (player) player.scrollIntoView({ behavior: 'instant', block: 'center' });
+                    }""")
+                    await asyncio.sleep(1.5)
+                    _vtrace("scroll complete — checking for play button")
+
+                    has_play_btn = await page.evaluate(
+                        """() => !!document.querySelector('.jwplayer:not(.jw-flag-floating) [aria-label="Play"]')"""
+                    )
+                    if has_play_btn:
+                        _vtrace("play button found — clicking")
+                        await page.evaluate("""() => {
+                            const player = document.querySelector('.jwplayer:not(.jw-flag-floating)');
+                            if (!player) return;
+                            const btn = player.querySelector('[aria-label="Play"]');
+                            if (btn) btn.click();
+                        }""")
+                        _vtrace("play button clicked — IMA request will fire in background while other tests run")
+                    else:
+                        _vtrace("no play button visible — player already autoplaying")
+
+                    await page.evaluate("() => { window.__imaVideoSetupDone = true; }")
+                else:
+                    _vtrace(f"no inline JW Player appeared after {_player_timeout:.0f}s — giving up")
+            except Exception as e:
+                _vtrace(f"video setup error: {e}")
+
+        _vtrace("starting test loop")
+
+        # ---- Apply site test plan (inherit-all, then exclude by page type) ----
         # IMPORTANT: site plans are keyed by publisher, not by active_site variants
         # When tests are explicitly named (--test / --tests), bypass plan exclusions entirely.
         site_plan = SITE_TEST_PLANS.get(publisher, {})
@@ -808,6 +930,13 @@ class TestFramework:
                 url_results.append(err_result)
                 _progress_end(prefix, colour_state("error"))
                 print(dim(f"{'':>{arrow_indent}}↳ {str(e).strip().splitlines()[0][:120]}"))
+
+        # Remove the IMA request listener so it doesn't fire on subsequent URL navigations.
+        if _ima_on_request is not None:
+            try:
+                page.remove_listener('request', _ima_on_request)
+            except Exception:
+                pass
 
         left = total_urls - url_idx
         print(log_line("TESTING", device, f"url {url_idx}/{total_urls}", f"done, {left} left"))

@@ -1,6 +1,31 @@
 (function () {
   try {
     // ------------------------------------------------------------
+    // JW Player strategy rules capture
+    // Patches console.log before page scripts run so the strategy
+    // decision ("Strategy Rules Premium player" etc.) is stored.
+    // ------------------------------------------------------------
+    window.__strategyPlayer = window.__strategyPlayer || null;
+
+    var _origConsoleLog = console.log;
+    console.log = function () {
+      try {
+        var msg = Array.prototype.slice.call(arguments)
+          .map(function (a) { return typeof a === 'string' ? a : ''; })
+          .join(' ');
+        var idx = msg.indexOf('Strategy Rules ');
+        if (idx !== -1) {
+          window.__strategyPlayer = msg.slice(idx + 'Strategy Rules '.length).trim();
+        }
+      } catch (e) {}
+      return _origConsoleLog.apply(this, arguments);
+    };
+  } catch (e) {}
+})();
+
+(function () {
+  try {
+    // ------------------------------------------------------------
     // Prebid event stores
     // ------------------------------------------------------------
     window.__pbjsBidEvents = window.__pbjsBidEvents || [];                 // legacy: combined
@@ -17,7 +42,7 @@
     // Prevent double-hooking on repeated navigations in the same context
     window.__pbjsEventHooked = window.__pbjsEventHooked || false;
 
-    const HERO_CODES = new Set(["hero_player"]);
+    const HERO_CODES = new Set(["hero_player", "primis_hero_player_direct"]);
 
     const norm = (x) => {
       try { return (x == null ? "" : String(x)).trim().toLowerCase(); }

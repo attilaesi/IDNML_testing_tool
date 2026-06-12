@@ -100,7 +100,7 @@ def _agg_cell(states: List[TestState]) -> str:
         return f"FAIL ({n_fail}/{total})" if n_fail < total else "FAIL"
     if n_skip == total:
         return "SKIP"
-    if n_pass == total:
+    if n_pass + n_skip == total:
         return "PASS"
     return "MIXED"
 
@@ -130,6 +130,34 @@ def _agg_ck(cell: str) -> str:
     if t == "MIXED":
         return "mixed"
     return "dash"
+
+
+# ── Component ordering ────────────────────────────────────────────────────────
+
+_COMPONENT_ORDER = ["env", "gpt", "ima", "pbjs", "layout", "taboola"]
+_COMPONENT_LABELS = {
+    "env": "ENVIRONMENT",
+    "gpt": "GPT",
+    "ima": "IMA VIDEO",
+    "pbjs": "PREBID",
+    "layout": "LAYOUT",
+    "taboola": "LAYOUT",
+}
+
+def _component_prefix(name: str) -> str:
+    for prefix in _COMPONENT_ORDER:
+        if name.startswith(prefix):
+            return prefix
+    return ""
+
+def _component_sort_key(name: str) -> tuple:
+    for i, prefix in enumerate(_COMPONENT_ORDER):
+        if name.startswith(prefix):
+            return (i, name)
+    return (len(_COMPONENT_ORDER), name)
+
+def _sort_by_component(names) -> List[str]:
+    return sorted(names, key=_component_sort_key)
 
 
 # ── Docstring helpers (for Appendix tab) ─────────────────────────────────────
@@ -232,6 +260,43 @@ class SheetsWriter:
             self._write_sync, all_results, device_keys, meta
         )
 
+    # ── Drive folder helpers ──────────────────────────────────────────────────
+
+    def _get_or_create_dated_folder(self, session, parent_folder_id: str) -> str:
+        """Return the Drive folder ID for today's date under parent_folder_id.
+
+        Searches for a folder named YYYY-MM-DD; creates it if missing.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        q = (
+            f"'{parent_folder_id}' in parents"
+            f" and name='{today}'"
+            f" and mimeType='application/vnd.google-apps.folder'"
+            f" and trashed=false"
+        )
+        resp = session.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params={"q": q, "fields": "files(id)", "pageSize": "1"},
+        )
+        resp.raise_for_status()
+        files = resp.json().get("files", [])
+        if files:
+            print(f"   Using existing folder: {today}")
+            return files[0]["id"]
+        resp = session.post(
+            "https://www.googleapis.com/drive/v3/files",
+            json={
+                "name": today,
+                "mimeType": "application/vnd.google-apps.folder",
+                "parents": [parent_folder_id],
+            },
+            params={"fields": "id"},
+        )
+        resp.raise_for_status()
+        folder_id = resp.json()["id"]
+        print(f"   Created folder: {today}")
+        return folder_id
+
     # ── Auth ──────────────────────────────────────────────────────────────────
 
     def _build_client(self):
@@ -320,12 +385,13 @@ class SheetsWriter:
             if folder_id:
                 from google.auth.transport.requests import AuthorizedSession
                 session = AuthorizedSession(creds)
+                target_folder_id = self._get_or_create_dated_folder(session, folder_id)
                 resp = session.post(
                     "https://www.googleapis.com/drive/v3/files",
                     json={
                         "name": title,
                         "mimeType": "application/vnd.google-apps.spreadsheet",
-                        "parents": [folder_id],
+                        "parents": [target_folder_id],
                     },
                     params={"fields": "id"},
                 )
@@ -355,7 +421,7 @@ class SheetsWriter:
 
         # ── Collect test docs and pre-compute Appendix row map ────────────────
         test_docs = _collect_test_docs()
-        all_test_names_sorted = sorted({r.test_name for r in all_results if r.test_name})
+        all_test_names_sorted = _sort_by_component({r.test_name for r in all_results if r.test_name})
         # Row 1 = banner, Row 2 = headers, Row 3+ = data
         appendix_row_map: Dict[str, int] = {
             name: idx + 3 for idx, name in enumerate(all_test_names_sorted)
@@ -508,7 +574,7 @@ class SheetsWriter:
 
         urls = _stable_urls(results)
         page_types = _url_page_types(results)
-        test_names = sorted({r.test_name for r in results if r.test_name})
+        test_names = _sort_by_component({r.test_name for r in results if r.test_name})
         result_map: Dict[Tuple[str, str], TestResult] = {}
         for r in results:
             if r.url:
@@ -562,8 +628,19 @@ class SheetsWriter:
         # ── Matrix data rows ──────────────────────────────────────────────────
         MATRIX_DATA_START = row()
         test_name_to_row: Dict[str, int] = {}
+        _current_component = None
 
         for test_name in test_names:
+            component = _component_prefix(test_name)
+            if component != _current_component:
+                _current_component = component
+                label = _COMPONENT_LABELS.get(component, component.upper())
+                r = row()
+                data.append([label])
+                fmt(r, 1, r, total_cols, CellFormat(
+                    backgroundColor=_c("header_md"),
+                    textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
+                ))
             r = row()
             test_name_to_row[test_name] = r
 
@@ -639,7 +716,7 @@ class SheetsWriter:
 
         if failing:
             for u in urls:
-                group = sorted(by_url.get(u, []), key=lambda x: x.test_name or "")
+                group = sorted(by_url.get(u, []), key=lambda x: _component_sort_key(x.test_name or ""))
                 for r_ in group:
                     msgs = r_.errors if r_.errors else (r_.warnings or [])
                     state_str = "ERROR" if r_.state == TestState.ERROR else "FAIL"
@@ -738,6 +815,7 @@ class SheetsWriter:
         ts = run_meta.get("timestamp", "")
         env = run_meta.get("env", "")
         geo = run_meta.get("geo", "")
+        runner = run_meta.get("runner", "")
 
         # ── Row 1: title banner ───────────────────────────────────────────────
         r = row()
@@ -753,6 +831,7 @@ class SheetsWriter:
             f"Site: {site}" if site else "",
             f"Env: {env}" if env else "",
             f"Geo: {geo}" if geo else "",
+            f"Runner: {runner}" if runner else "",
             f"Run: {ts}" if ts else "",
         ] if x]
         data.append(["   ".join(parts)])
@@ -768,8 +847,9 @@ class SheetsWriter:
         data.append(["DEVICE PASS RATES"])
         fmt(r, 1, r, 6, CellFormat(textFormat=TextFormat(bold=True, fontSize=11)))
 
+        profile_col_label = "BrowserStack Profile" if runner == "BrowserStack" else "Playwright Profile"
         r = row()
-        data.append(["Device", "Playwright Profile", "Tests", "PASS", "FAIL", "SKIP"])
+        data.append(["Device", profile_col_label, "Tests", "PASS", "FAIL", "SKIP"])
         fmt(r, 1, r, 6, CellFormat(
             backgroundColor=_c("header_dk"),
             textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
@@ -818,9 +898,20 @@ class SheetsWriter:
         for x in all_results:
             buckets[(x.test_name, getattr(x, "device", ""))].append(x.state)
 
-        all_test_names = sorted({x.test_name for x in all_results if x.test_name})
+        all_test_names = _sort_by_component({x.test_name for x in all_results if x.test_name})
+        _current_component = None
 
         for test_name in all_test_names:
+            component = _component_prefix(test_name)
+            if component != _current_component:
+                _current_component = component
+                label = _COMPONENT_LABELS.get(component, component.upper())
+                r = row()
+                data.append([label])
+                fmt(r, 1, r, total_cols, CellFormat(
+                    backgroundColor=_c("header_md"),
+                    textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
+                ))
             r = row()
             row_data: List = [_test_name_cell(test_name)]
 
@@ -1092,9 +1183,10 @@ class SheetsWriter:
             if folder_id:
                 from google.auth.transport.requests import AuthorizedSession
                 session = AuthorizedSession(creds)
+                target_folder_id = self._get_or_create_dated_folder(session, folder_id)
                 resp = session.post(
                     "https://www.googleapis.com/drive/v3/files",
-                    json={"name": title, "mimeType": "application/vnd.google-apps.spreadsheet", "parents": [folder_id]},
+                    json={"name": title, "mimeType": "application/vnd.google-apps.spreadsheet", "parents": [target_folder_id]},
                     params={"fields": "id"},
                 )
                 resp.raise_for_status()

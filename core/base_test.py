@@ -63,6 +63,8 @@ class BaseTest(ABC):
             return 'Prebid'
         elif 'gpt_tests' in module_path:
             return 'GPT'
+        elif 'ima_tests' in module_path:
+            return 'IMA'
         elif 'content_tests' in module_path:
             return 'Content'
         elif 'performance_tests' in module_path:

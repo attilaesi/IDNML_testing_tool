@@ -10,6 +10,17 @@ from core.base_test import TestState
 from core.ansi import green, red, yellow, dim
 from core.framework_manager import TestFramework
 
+_COMPONENT_ORDER = ["env", "gpt", "ima", "pbjs", "layout", "taboola"]
+
+def _component_key(name: str) -> tuple:
+    for i, prefix in enumerate(_COMPONENT_ORDER):
+        if name.startswith(prefix):
+            return (i, name)
+    return (len(_COMPONENT_ORDER), name)
+
+def _sort_by_component(names) -> List[str]:
+    return sorted(names, key=_component_key)
+
 
 def print_runner_banner(config: dict, label: str = "AD TEST RUN") -> None:
     """Print a clear header showing execution target (local Playwright vs BrowserStack)."""
@@ -103,6 +114,92 @@ def _per_url_summary(executed_results, url_order: List[str]) -> List[Tuple[str, 
     return out
 
 
+def print_failure_details(
+    results,
+    url_order: List[str] = None,
+    device_keys: List[str] = None,
+) -> None:
+    """Print consolidated failure/error details.
+
+    When device_keys has more than one entry (multi-device run) each line is
+    prefixed with the device name.  For single-device runs the full URL is shown.
+    """
+    from collections import OrderedDict
+
+    failed_or_err = [r for r in results if r.state in (TestState.FAILED, TestState.ERROR)]
+    if not failed_or_err:
+        return
+
+    if not url_order:
+        seen: set = set()
+        url_order = []
+        for r in results:
+            if getattr(r, "url", None) and r.url not in seen:
+                url_order.append(r.url)
+                seen.add(r.url)
+
+    multi_device = bool(device_keys and len(device_keys) > 1)
+    url_to_label = {u: f"URL{idx + 1}" for idx, u in enumerate(url_order)}
+    dev_order = {d: i for i, d in enumerate(device_keys or [])}
+
+    url_to_pagetype: Dict[str, str] = {}
+    for r in results:
+        u = getattr(r, "url", None)
+        if u and u not in url_to_pagetype:
+            pt = (getattr(r, "metadata", None) or {}).get("page_type") or "unknown"
+            url_to_pagetype[u] = pt
+
+    by_test: Dict[str, List] = defaultdict(list)
+    for r in failed_or_err:
+        by_test[r.test_name].append(r)
+
+    print("\n" + "-" * 50)
+    print("🔍 Failed / Error details")
+
+    for test_name in _sort_by_component(by_test):
+        rs = by_test[test_name]
+        has_error = any(r.state == TestState.ERROR for r in rs)
+        state_label = red("ERROR") if has_error else red("FAIL")
+
+        # Denominator: results for this test that weren't skipped
+        non_skip = [r for r in results if r.test_name == test_name and r.state != TestState.SKIPPED]
+        denom = len(non_skip) if non_skip else len(url_order)
+        print(f"\n• {test_name}  {state_label}  {red(f'({len(rs)}/{denom})')}")
+
+        if multi_device:
+            rs_sorted = sorted(
+                rs,
+                key=lambda r: (
+                    dev_order.get(getattr(r, "device", ""), 999),
+                    url_order.index(r.url) if r.url in url_order else 999,
+                ),
+            )
+        else:
+            rs_sorted = sorted(rs, key=lambda r: url_order.index(r.url) if r.url in url_order else 999)
+
+        fingerprint_groups: "OrderedDict[str, list]" = OrderedDict()
+        for r in rs_sorted:
+            msgs = r.errors if r.errors else r.warnings
+            fp = "\n".join(str(m) for m in (msgs or []))
+            if fp not in fingerprint_groups:
+                fingerprint_groups[fp] = []
+            fingerprint_groups[fp].append(r)
+
+        for fp, group_rs in fingerprint_groups.items():
+            for r in group_rs:
+                page_type = url_to_pagetype.get(r.url, "unknown")
+                tag = (getattr(r, "metadata", None) or {}).get("layout_tag")
+                pt_str = f"[{page_type}{', ' + tag if tag else ''}]"
+                if multi_device:
+                    dev = getattr(r, "device", "")
+                    url_lbl = url_to_label.get(r.url, r.url)
+                    print(f"  [{dev}] {url_lbl} {pt_str}")
+                else:
+                    print(f"  {pt_str} {r.url}")
+            for line in fp.splitlines():
+                print(dim("      - " + line))
+
+
 def print_results(results, framework: TestFramework, config: dict, elapsed: float) -> None:
     """Print the full results summary: counts, per-URL, matrix, failure details, pass details."""
     executed = [r for r in results if r.state not in (TestState.SKIPPED,)]
@@ -135,59 +232,8 @@ def print_results(results, framework: TestFramework, config: dict, elapsed: floa
                 f"pass={s['passed_rows']} fail={s['failed_rows']} err={s['error_rows']}"
             )
 
-    # Failed / Error details
     if bool(config.get("print_failed_details", True)):
-        failed_or_err_all = [
-            r for r in results if r.state in (TestState.FAILED, TestState.ERROR)
-        ]
-        if failed_or_err_all:
-            from collections import OrderedDict
-
-            url_to_label = {u: f"URL{idx+1}" for idx, u in enumerate(url_order)}
-            total_urls = len(url_order)
-
-            url_to_pagetype: Dict[str, str] = {}
-            for r in results:
-                u = getattr(r, "url", None)
-                if u and u not in url_to_pagetype:
-                    pt = (getattr(r, "metadata", None) or {}).get("page_type") or "unknown"
-                    url_to_pagetype[u] = pt
-
-            by_test: Dict[str, List] = defaultdict(list)
-            for r in failed_or_err_all:
-                by_test[r.test_name].append(r)
-
-            print("\n" + "-" * 50)
-            print("🔍 Failed / Error details")
-            for test_name in sorted(by_test):
-                rs = by_test[test_name]
-                fail_count = len(rs)
-                has_error = any(r.state == TestState.ERROR for r in rs)
-                state_label = red("ERROR") if has_error else red("FAIL")
-                print(f"\n• {test_name}  {state_label}  {red(f'({fail_count}/{total_urls} URLs)')}")
-                rs_sorted = sorted(rs, key=lambda r: url_order.index(r.url) if r.url in url_order else 999)
-                fingerprint_groups: "OrderedDict[str, list]" = OrderedDict()
-                for r in rs_sorted:
-                    msgs = r.errors if r.errors else r.warnings
-                    fingerprint = "\n".join(str(m) for m in (msgs or []))
-                    if fingerprint not in fingerprint_groups:
-                        fingerprint_groups[fingerprint] = []
-                    fingerprint_groups[fingerprint].append(r)
-
-                for fingerprint, group_rs in fingerprint_groups.items():
-                    def _url_label(r):
-                        page_type = url_to_pagetype.get(r.url, "unknown")
-                        tag = (getattr(r, "metadata", None) or {}).get("layout_tag")
-                        prefix = f"[{page_type}"
-                        if tag:
-                            prefix += f", {tag}"
-                        prefix += "]"
-                        return f"  {prefix} {r.url}"
-
-                    for r in group_rs:
-                        print(_url_label(r))
-                    for line in fingerprint.splitlines():
-                        print(dim("      - " + line))
+        print_failure_details(results, url_order=url_order)
 
     # Passed details
     if bool(config.get("print_passed_details", True)):
@@ -201,7 +247,7 @@ def print_results(results, framework: TestFramework, config: dict, elapsed: floa
 
             print("\n" + "-" * 50)
             print("✅ Passing test details")
-            for test_name in sorted(by_test_p):
+            for test_name in _sort_by_component(by_test_p):
                 rs = by_test_p[test_name]
                 pass_count = len(rs)
                 print(f"\n• {test_name}  {green('PASS')}  {green(f'({pass_count}/{total_urls} URLs)')}")

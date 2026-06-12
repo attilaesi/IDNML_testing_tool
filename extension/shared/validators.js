@@ -41,7 +41,7 @@ const VALIDATORS = {
     return [];
   },
 
-  "pbjs_auction_activity": (data) => {
+  "pbjs_display_auction_activity": (data) => {
     const errors = [];
     const activity = (data && data.prebid_auction_activity) ? data.prebid_auction_activity : (data || {});
     for (const e of (activity.errors || [])) errors.push("Extraction error: " + e);
@@ -94,7 +94,7 @@ const VALIDATORS = {
     return userIds.length ? [] : ["No identity modules found in pbjs.getConfig().userSync.userIds"];
   },
 
-  "pbjs_price_floors_display": (data) => {
+  "pbjs_display_price_floors": (data) => {
     const errors = [];
     const floors = (data && data.prebid_floors_display) ? data.prebid_floors_display : (data || {});
     for (const e of (floors.errors || [])) errors.push("Extraction warning: " + e);
@@ -116,7 +116,7 @@ const VALIDATORS = {
     return errors;
   },
 
-  "pbjs_price_floors_video": (data, allResults) => {
+  "pbjs_video_price_floors": (data, allResults) => {
     const errors = [];
     const floors = (data && data.prebid_floors_video) ? data.prebid_floors_video : (data || {});
     for (const e of (floors.errors || [])) errors.push("Extraction warning: " + e);
@@ -140,14 +140,14 @@ const VALIDATORS = {
     return errors;
   },
 
-  "pbjs_pubcid_presence_display": (data) => {
+  "pbjs_display_pubcid_presence": (data) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not found"];
     if (parseInt(data.bidRequestedEvents || 0, 10) === 0) return ["No DISPLAY bidRequested events captured; cannot confirm pubcid."];
     const missing = data.biddersMissingPubcid || [];
     return missing.length ? ["pubcid missing for DISPLAY bidders: " + missing.join(", ")] : [];
   },
 
-  "pbjs_pubcid_presence_video": (data, allResults) => {
+  "pbjs_video_pubcid_presence": (data, allResults) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not found"];
     if (parseInt(data.heroBidsConsidered || 0, 10) === 0) {
       return _isVideoPage(allResults)
@@ -170,30 +170,32 @@ const VALIDATORS = {
     return errors;
   },
 
-  "pbjs_hero_player_placement": (data, allResults) => {
+  "pbjs_video_hero_player_placement": (data, allResults) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not present"];
     if (parseInt(data.eventsLen || 0, 10) === 0 || parseInt(data.heroBidsTotal || 0, 10) === 0) {
       return _isVideoPage(allResults)
         ? ["No hero_player bids found on a video page (poller waited but no video events fired)."]
-        : null; // SKIP — no video on this page type
+        : null;
     }
+    const expP = data.expectedPlacement ?? 1;
+    const expC = data.expectedPlcmt ?? 2;
     const lines = [];
     for (const bidder of Object.keys(data.perBidder || {}).sort()) {
       const info = data.perBidder[bidder] || {};
       const missP = parseInt(info.missingPlacement || 0, 10), invP = parseInt(info.invalidPlacement || 0, 10);
-      const missC = parseInt(info.missingPlcmt || 0, 10), invC = parseInt(info.invalidPlcmt || 0, 10);
-      const mismatch = parseInt(info.mismatch || 0, 10);
-      if (!missP && !invP && !missC && !invC && !mismatch) continue;
+      const missC = parseInt(info.missingPlcmt || 0, 10),     invC = parseInt(info.invalidPlcmt || 0, 10);
+      if (!missP && !invP && !missC && !invC) continue;
       const r = [];
-      if (missP) r.push("missing placement=" + missP); if (invP) r.push("invalid placement=" + invP);
-      if (missC) r.push("missing plcmt=" + missC); if (invC) r.push("invalid plcmt=" + invC);
-      if (mismatch) r.push("placement/plcmt mismatch=" + mismatch);
+      if (missP) r.push("missing placement=" + missP);
+      if (invP)  r.push("invalid placement=" + invP + " (expected " + expP + ")");
+      if (missC) r.push("missing plcmt=" + missC);
+      if (invC)  r.push("invalid plcmt=" + invC + " (expected " + expC + ")");
       lines.push(bidder + ": " + r.join("; "));
     }
     return lines.length ? ["Hero player placement failures:\n" + lines.join("\n")] : [];
   },
 
-  "pbjs_mantis_signals_bid": (data) => {
+  "pbjs_display_mantis_signals_bid": (data) => {
     if (!data || !data.hasPbjs) return ["pbjs not present"];
     if (!parseInt(data.totalRequests || 0, 10)) return ["No bidder requests found"];
     const bidders = Object.keys(data.perBidder || {});
@@ -219,7 +221,7 @@ const VALIDATORS = {
     return errors;
   },
 
-  "pbjs_permutive_signals_bid": (data) => {
+  "pbjs_display_permutive_signals_bid": (data) => {
     if (!data || !data.hasPbjs) return ["pbjs not present"];
     if (!parseInt(data.totalRequests || 0, 10)) return ["No bidder requests found"];
     const REQUIRED = ["ix", "rubicon", "msft", "pubmatic"];
@@ -306,6 +308,120 @@ const VALIDATORS = {
     if (data.skipped) return [];
     const f = (data.rows || []).filter(r => (r.status || "").startsWith("FAIL"));
     return f.map(r => r.slot + ": " + r.status + (r.reason ? " — " + r.reason : ""));
+  },
+
+  // -------------------------------------------------------------------------
+  // IMA (video VAST cust_params) validators
+  // null data = no IMA request captured → SKIP
+  // [] data   = key absent from cust_params
+  // ["v"]     = key present with value v
+  // -------------------------------------------------------------------------
+
+  "ima_strategy_player": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return ["No JW Player strategy rules log captured."];
+    return data.some(v => v) ? [] : ["No JW Player strategy rules log captured."];
+  },
+
+  "ima_page_type": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["pageType missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["pageType present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_category1": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["category1 missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["category1 present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_category2": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    const cat2 = (data.category2 || []);
+    if (!cat2.length) return ["category2 missing from IMA cust_params"];
+    if (!cat2.some(v => v)) return ["category2 present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_mantis": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["mantis missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["mantis present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_mantis_context": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["mantis_context missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["mantis_context present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_permutive": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["permutive missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["permutive present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_topictags": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["topictags missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["topictags present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_liveblog": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["liveblog missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["liveblog present but empty in IMA cust_params"];
+    const bad = data.filter(v => !["y", "n"].includes(String(v).toLowerCase()));
+    if (bad.length) return ["liveblog invalid in IMA cust_params (expected 'y'/'n'): " + bad.join(", ")];
+    return [];
+  },
+
+  "ima_video_id": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["videoID missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["videoID present but empty in IMA cust_params"];
+    const invalid = data.filter(v => !/^[a-zA-Z0-9]{4,}$/.test(String(v).trim()));
+    if (invalid.length) return ["videoID format invalid (expected alphanumeric, e.g. yYEQtO0C): " + invalid.join(", ")];
+    return [];
+  },
+
+  "ima_bsc": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["BSC missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["BSC present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_abs": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["ABS missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["ABS present but empty in IMA cust_params"];
+    return [];
+  },
+
+  "ima_adpos": (data, allResults) => {
+    if (!_isVideoPage(allResults)) return null;
+    if (data === null) return null;
+    if (!data.length) return ["adpos missing from IMA cust_params"];
+    if (!data.some(v => v)) return ["adpos present but empty in IMA cust_params"];
+    return [];
   },
 
 };

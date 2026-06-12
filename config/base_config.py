@@ -1,7 +1,29 @@
 # config/base_config.py
 
+import os
+from pathlib import Path
+
 from config.site_urls import SITE_PROFILES
 from config.device_config import ACTIVE_DEVICE
+
+
+def _load_env_local() -> None:
+    """Load env.local from the repo root into os.environ if the file exists."""
+    env_file = Path(__file__).resolve().parent.parent / "env.local"
+    if not env_file.is_file():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
+
+
+_load_env_local()
 
 
 class TestConfig:
@@ -68,10 +90,10 @@ class TestConfig:
             "max_pages": 10,
 
             # Per-URL concurrency: 1 = sequential, N = up to N pages in parallel
-            "concurrency": 2,
+            "concurrency": 1,
 
             # Per-device concurrency in multi-device runs: 1 = sequential, N = up to N devices in parallel
-            "device_concurrency": 4,
+            "device_concurrency": 1,
 
             # Debug / robustness settings
             "debug_screenshots": False,    # CMP / failure screenshots
@@ -79,8 +101,12 @@ class TestConfig:
             "page_type_timeout": 3.0,      # seconds to poll for pageType
             "warmup_pages": 3,             # number of pages to run before testing start
 
-            # 🔸 Global trace switch for extra console logging in tests
+            # Global trace switch for extra console logging in tests
             "trace": False,
+
+            # Detailed IMA/video milestone logging with timestamps.
+            # Enable when diagnosing click-to-play or IMA capture timing issues.
+            "video_trace": True,
 
             # Terminal matrix display
             "matrix_max_test_width": 36,

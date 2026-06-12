@@ -8,18 +8,18 @@ const CATEGORIES = {
     "pbjs_environment",
     "pbjs_display_bidder_presence",
     "pbjs_video_bidder_presence",
-    "pbjs_auction_activity",
+    "pbjs_display_auction_activity",
     "pbjs_adunit_configuration",
     "pbjs_consent_integration",
     "pbjs_identity_modules",
-    "pbjs_price_floors_display",
-    "pbjs_price_floors_video",
-    "pbjs_pubcid_presence_display",
-    "pbjs_pubcid_presence_video",
+    "pbjs_display_price_floors",
+    "pbjs_video_price_floors",
+    "pbjs_display_pubcid_presence",
+    "pbjs_video_pubcid_presence",
     "pbjs_timeout_config",
-    "pbjs_hero_player_placement",
-    "pbjs_mantis_signals_bid",
-    "pbjs_permutive_signals_bid",
+    "pbjs_video_hero_player_placement",
+    "pbjs_display_mantis_signals_bid",
+    "pbjs_display_permutive_signals_bid",
   ],
   "GPT": [
     "gpt_page_type",
@@ -51,6 +51,21 @@ const CATEGORIES = {
   "ENVIRONMENT": [
     "env_is_mobile_or_tablet",
   ],
+  "IMA": [
+    "ima_strategy_player",
+    "ima_page_type",
+    "ima_category1",
+    "ima_category2",
+    "ima_mantis",
+    "ima_mantis_context",
+    "ima_permutive",
+    "ima_topictags",
+    "ima_liveblog",
+    "ima_video_id",
+    "ima_adpos",
+    "ima_bsc",
+    "ima_abs",
+  ],
 };
 
 
@@ -61,18 +76,18 @@ const TEST_FILES = [
   "js/pbjs_environment.js",
   "js/pbjs_display_bidder_presence.js",
   "js/pbjs_video_bidder_presence.js",
-  "js/pbjs_auction_activity.js",
+  "js/pbjs_display_auction_activity.js",
   "js/pbjs_adunit_configuration.js",
   "js/pbjs_consent_integration.js",
   "js/pbjs_identity_modules.js",
-  "js/pbjs_price_floors_display.js",
-  "js/pbjs_price_floors_video.js",
-  "js/pbjs_pubcid_presence_display.js",
-  "js/pbjs_pubcid_presence_video.js",
+  "js/pbjs_display_price_floors.js",
+  "js/pbjs_video_price_floors.js",
+  "js/pbjs_display_pubcid_presence.js",
+  "js/pbjs_video_pubcid_presence.js",
   "js/pbjs_timeout_config.js",
-  "js/pbjs_hero_player_placement.js",
-  "js/pbjs_mantis_signals_bid.js",
-  "js/pbjs_permutive_signals_bid.js",
+  "js/pbjs_video_hero_player_placement.js",
+  "js/pbjs_display_mantis_signals_bid.js",
+  "js/pbjs_display_permutive_signals_bid.js",
   "js/gpt_page_type.js",
   "js/gpt_mantis.js",
   "js/gpt_mantis_context.js",
@@ -97,6 +112,19 @@ const TEST_FILES = [
   "js/gpt_untested_keys.js",
   "js/layout_ad_sequence.js",
   "js/env_is_mobile_or_tablet.js",
+  "js/ima_strategy_player.js",
+  "js/ima_page_type.js",
+  "js/ima_category1.js",
+  "js/ima_category2.js",
+  "js/ima_mantis.js",
+  "js/ima_mantis_context.js",
+  "js/ima_permutive.js",
+  "js/ima_topictags.js",
+  "js/ima_liveblog.js",
+  "js/ima_video_id.js",
+  "js/ima_adpos.js",
+  "js/ima_bsc.js",
+  "js/ima_abs.js",
 ];
 
 // Self-contained runner (same logic as background.js runAllTests, no closures)
@@ -311,11 +339,20 @@ async function triggerRerun(tabId) {
           function hasDisplay() { return (window.__pbjsBidEventsDisplay || []).length > 0; }
           function hasVideo()   { return (window.__pbjsBidEventsVideo   || []).length > 0; }
           function getPageType() { try { var pt = window.googletag && googletag.pubads && googletag.pubads().getTargeting("pageType"); return pt && pt[0] ? String(pt[0]).toLowerCase() : ""; } catch(e) { return ""; } }
-          function waitVideo() { var vs = Date.now(); function poll() { if (hasVideo()) return resolve("ready"); if (Date.now()-vs > MAX_VIDEO) return resolve("timeout_video"); setTimeout(poll, INTERVAL); } poll(); }
+          function waitVideo() { var vs = Date.now(); function poll() { if (hasVideo()) return resolve("ready_video"); if (Date.now()-vs > MAX_VIDEO) return resolve("timeout_video"); setTimeout(poll, INTERVAL); } poll(); }
           function check() { if (hasPbjs() && hasDisplay()) { return getPageType() === "video" ? waitVideo() : resolve("ready"); } if (Date.now()-start > MAX_DISPLAY) return resolve("timeout"); setTimeout(check, INTERVAL); }
           check();
         });
       },
+    });
+
+    // Ask background for the IMA capture for this tab, then inject it before tests
+    const bgImaData = await chrome.runtime.sendMessage({ type: "getImaCapture", tabId });
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: (data) => { window.__imaAdRequest = data; },
+      args: [bgImaData ?? null],
     });
 
     await chrome.scripting.executeScript({ target: { tabId }, files: TEST_FILES, world: "MAIN" });

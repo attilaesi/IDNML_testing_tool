@@ -1,6 +1,99 @@
 # Ad Testing Framework
 
-A modular, async Playwright-based framework for validating ad implementations across Independent and Standard Media Group sites. Tests cover Prebid.js configuration, GPT key-value targeting, layout/ad-sequence rules, and environment integrity.
+A modular, async Playwright-based framework for validating ad implementations across Independent and Standard Media Group sites. Tests cover Prebid.js configuration, GPT key-value targeting, IMA video ad targeting, layout/ad-sequence rules, and environment integrity.
+
+Also includes a **Chrome extension** (Ad Inspector) that runs the same tests live in any browser tab.
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Python 3.10 or later
+- pip
+- Google Chrome (for the extension)
+
+### 1. Clone the repo
+
+```bash
+git clone <repo-url>
+cd IDNML_testing_tool
+```
+
+### 2. Create and activate a virtual environment
+
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+```
+
+### 3. Install Python dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Install Playwright browsers
+
+```bash
+playwright install chromium
+```
+
+### 5. Create env.local
+
+Create a file named `env.local` in the repo root. All variables are optional depending on which features you use:
+
+```bash
+# Supabase — required for --regression flag
+SUPABASE_URL="https://your-project.supabase.co"
+SUPABASE_ANON_KEY="your-anon-key"
+
+# BrowserStack — required for --browserstack flag
+BROWSERSTACK_USERNAME="your_username"
+BROWSERSTACK_ACCESS_KEY="your_access_key"
+```
+
+The file is loaded automatically at startup. You do **not** need to source it manually.
+
+### 6. Verify the setup
+
+```bash
+python -m tasks.run_tests --site independent_uat --test gpt_page_type_test
+```
+
+You should see a test matrix printed to the terminal.
+
+---
+
+## Chrome Extension (Ad Inspector)
+
+The extension runs all tests live in any browser tab as you browse, without needing Playwright or Python.
+
+### Install
+
+1. Open Chrome and go to `chrome://extensions`
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked** and select the `extension/` folder from this repo
+4. The Ad Inspector icon will appear in your toolbar
+
+### Usage
+
+- Navigate to any Independent or Standard Media page
+- The extension auto-runs tests on page load and shows a badge with the fail count
+- Click the icon to see full pass/fail results per test, with expandable data panels
+- Use **Re-run** to re-run tests on the current page (useful after video player loads)
+- Use **Copy JSON** to copy the full result payload to the clipboard
+
+### Keeping extension JS in sync
+
+Test logic lives in `tests/js/`. After editing any JS test file, run:
+
+```bash
+python sync_extension.py
+```
+
+This wraps the bare functions for the extension context and copies them to `extension/js/`.
 
 ---
 
@@ -176,20 +269,42 @@ self.geo = "uk"   # "uk" | "us" | None (None = infer from Locale cookie)
 |---|---|
 | `pbjs_display_bidder_presence_test` | Expected display bidders present and active |
 | `pbjs_video_bidder_presence_test` | Expected video bidders present and active |
-| `pbjs_hero_player_placement_test` | Hero player ad unit configured correctly |
-| `pbjs_price_floors_display_test` | Price floors set for display |
-| `pbjs_price_floors_video_test` | Price floors set for video |
+| `pbjs_video_hero_player_placement_test` | Hero player ad unit configured correctly |
+| `pbjs_display_price_floors_test` | Price floors set for display |
+| `pbjs_video_price_floors_test` | Price floors set for video |
 | `pbjs_display_pubcid_presence_test` | PubCID module active for display |
 | `pbjs_video_pubcid_presence_test` | PubCID module active for video |
-| `pbjs_auction_activity_test` | Auction fired and received bids |
+| `pbjs_display_auction_activity_test` | Display auction fired and received bids |
 | `pbjs_adunit_configuration_test` | Ad unit config is valid |
 | `pbjs_consent_integration_test` | Prebid consent integration |
 | `pbjs_identity_modules_test` | Identity modules loaded |
-| `pbjs_mantis_signals_bid_test` | Mantis signals passed into bids |
-| `pbjs_permutive_signals_bid_test` | Permutive signals passed into bids |
-| `pbjs_prebid_timeout_config_test` | Bid timeout configured correctly |
-| `pbjs_prebid_warnings_test` | No unexpected Prebid warnings |
-| `pbjs_prebid_environment_test` | Prebid version and environment checks |
+| `pbjs_display_mantis_signals_bid_test` | Mantis signals passed into display bids |
+| `pbjs_display_permutive_signals_bid_test` | Permutive signals passed into display bids |
+| `pbjs_timeout_config_test` | Bid timeout configured correctly |
+| `pbjs_warnings_test` | No unexpected Prebid warnings |
+| `pbjs_environment_test` | Prebid version and environment checks |
+
+### IMA tests (video ad targeting)
+
+These run on video pages only and validate the `cust_params` targeting keys sent in the IMA VAST request to GAM. All tests skip automatically on non-video pages.
+
+| Test | Key | Rule |
+|---|---|---|
+| `ima_page_type_test` | `pageType` | Must be present and non-empty |
+| `ima_category1_test` | `category1` | Must be present and non-empty |
+| `ima_category2_test` | `category2` | Must be present and non-empty |
+| `ima_mantis_test` | `mantis` | Must be present and non-empty |
+| `ima_mantis_context_test` | `mantis_context` | Must be present and non-empty |
+| `ima_permutive_test` | `permutive` | Must be present and non-empty |
+| `ima_topictags_test` | `topictags` | Must be present and non-empty |
+| `ima_liveblog_test` | `liveblog` | Must be present and must be `y` or `n` |
+| `ima_longread_test` | `longread` | Must be present and must be `y` or `n` |
+| `ima_video_id_test` | `VideoID` | Must be present and non-empty |
+| `ima_adpos_test` | `adpos` | Must be present and non-empty |
+
+```bash
+python -m tasks.run_tests --tests ima
+```
 
 ### Layout tests
 | Test | What it checks |

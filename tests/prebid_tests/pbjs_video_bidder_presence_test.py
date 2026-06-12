@@ -24,7 +24,7 @@ What counts as PASS / FAIL / SKIP
 - FAILED: Supabase returns 0 rows for the explicit context (configuration/mapping error).
 - FAILED: expected video bidders missing from the observed hero_player auction.
 - FAILED: video bidders observed that are not in the expected set.
-- SKIPPED: US geo, non-video page, pbjs missing, or Supabase not configured.
+- SKIPPED: US geo, non-video page, pbjs missing, Supabase not configured, or no hero_player bidRequested events captured (no-bid round).
 """
 
 from pathlib import Path
@@ -172,6 +172,11 @@ class PbjsVideoBidderPresenceTest(VideoOnlyTest):
         from core.device_helpers import device_label, bidder_lookup_device
         device = bidder_lookup_device(device_label(self.config))
         geo = locale.lower()
+
+        if int(diag.get("heroBidRequestedEvents") or 0) == 0:
+            result.state = TestState.SKIPPED
+            result.warnings.append("No VIDEO hero_player bidRequested events captured — no-bid round; skipping bidder presence check.")
+            return result
 
         # ✅ only bidders that actually bid on hero_player
         seen: Set[str] = set(diag.get("biddersFromHeroRequests") or [])

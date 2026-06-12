@@ -21,7 +21,7 @@ from config.device_config import DEVICE_SUITE
 from core.framework_manager import TestFramework
 from core.ansi import dim
 from core.url_context_helpers import env_from_url
-from tasks.common import print_runner_banner, _get_url_order
+from tasks.common import print_runner_banner, print_failure_details, _get_url_order
 
 VALID_SITES = [
     "independent", "independent_uat", "independent_staging",
@@ -37,7 +37,7 @@ def _make_device_config(base_cfg: TestConfig, device_key: str, device_name: str)
     cfg = base_cfg.get_config()
     cfg["device_name"] = device_name
     cfg["device_key"] = device_key     # used by framework to tag results correctly
-    cfg["print_matrix_summary"] = True  # each device prints its own matrix
+    cfg["print_matrix_summary"] = False  # only the final cross-device matrix is printed
     return cfg
 
 
@@ -122,6 +122,11 @@ async def main():
         action="store_true",
         help="Open a visible browser window instead of running headless.",
     )
+    parser.add_argument(
+        "--nosheet",
+        action="store_true",
+        help="Skip Google Sheets output at the end of the run.",
+    )
     args = parser.parse_args()
 
     # Build base config (site selection, URLs, etc.)
@@ -186,12 +191,18 @@ async def main():
 
     total_elapsed = time.monotonic() - total_start
 
-    # Cross-device comparison summary
+    # Cross-device comparison summary + combined failure details
     if all_results:
-        TestFramework.print_device_comparison_matrix(
-            all_results,
-            device_keys=list(active_suite.keys()),
-        )
+        device_keys = list(active_suite.keys())
+        TestFramework.print_device_comparison_matrix(all_results, device_keys=device_keys)
+
+        seen_urls: set = set()
+        url_order = []
+        for r in all_results:
+            if r.url and r.url not in seen_urls:
+                url_order.append(r.url)
+                seen_urls.add(r.url)
+        print_failure_details(all_results, url_order=url_order, device_keys=device_keys)
 
     # Supabase upload + regression diff (--regression only)
     combined_config = base_cfg.get_config()
@@ -213,13 +224,16 @@ async def main():
         regression = await sw.fetch_regression_diff(run_id, publisher, environment, geo)
 
     # Google Sheets output
-    if bool(combined_config.get("sheets_enabled", False)) and all_results:
+    if bool(combined_config.get("sheets_enabled", False)) and all_results and not args.nosheet:
         from core.sheets_writer import SheetsWriter
+        from core.supabase_writer import geo_from_results as _geo_from_results
+        _geo = (combined_config.get("geo") or "").upper() or _geo_from_results(all_results)
         run_meta = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "site": combined_config.get("active_site", ""),
             "env": env_from_url(combined_config.get("site_url", "")),
-            "geo": (combined_config.get("geo") or "").upper(),
+            "geo": _geo,
+            "runner": "BrowserStack" if args.browserstack else "Local Playwright",
             "device_names": dict(active_suite),
             "regression": regression,
         }

@@ -63,6 +63,12 @@ class BrowserManager:
         bs_key = os.getenv("BROWSERSTACK_ACCESS_KEY")
         use_browserstack = self.config.get("browserstack_enabled") and bs_user and bs_key
 
+        if self.config.get("browserstack_enabled") and not use_browserstack:
+            raise RuntimeError(
+                "BrowserStack requested (--browserstack) but credentials are missing. "
+                "Set BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY in env.local or your shell."
+            )
+
         if use_browserstack:
             self.browser = await self._connect_browserstack(bs_user, bs_key, device_name)
         else:
@@ -109,6 +115,78 @@ class BrowserManager:
             context_kwargs["http_credentials"] = {"username": username, "password": password}
 
         self.context = await self.browser.new_context(**context_kwargs)
+
+        # ---- Init script: capture JW Player strategy rules from console.log ----
+        await self.context.add_init_script("""
+            (function () {
+              try {
+                window.__strategyPlayer = window.__strategyPlayer || null;
+                var _origLog = console.log;
+                console.log = function () {
+                  try {
+                    var msg = Array.prototype.slice.call(arguments)
+                      .map(function(a) { return typeof a === 'string' ? a : ''; })
+                      .join(' ');
+                    var idx = msg.indexOf('Strategy Rules ');
+                    if (idx !== -1) {
+                      window.__strategyPlayer = msg.slice(idx + 'Strategy Rules '.length).trim();
+                    }
+                  } catch (e) {}
+                  return _origLog.apply(this, arguments);
+                };
+              } catch (e) {}
+            })();
+        """)
+
+        # ---- Init script: capture IMA ad request cust_params ----
+        # Patches XHR and fetch before any page scripts run so the video player's
+        # GAM VAST request is captured into window.__imaAdRequest.
+        await self.context.add_init_script("""
+            (function () {
+              try {
+                window.__imaAdRequest = window.__imaAdRequest || null;
+
+                var _IMA_ENDPOINTS = [
+                  'https://pubads.g.doubleclick.net/gampad/ads',
+                  'https://pagead2.googlesyndication.com/gampad/ads',
+                  'https://pubads.g.doubleclick.net/gampad/live/ads',
+                  'https://pagead2.googlesyndication.com/gampad/live/ads'
+                ];
+
+                function _captureImaUrl(url) {
+                  if (!url || typeof url !== 'string') return;
+                  if (!_IMA_ENDPOINTS.some(function(e) { return url.indexOf(e) === 0; })) return;
+                  try {
+                    var u = new URL(url);
+                    if (url.indexOf('hero_player') === -1) return;
+                    if (u.searchParams.get('env') !== 'vp') return;
+                    var raw = u.searchParams.get('cust_params');
+                    if (!raw) return;
+                    var decoded = decodeURIComponent(raw);
+                    var params = {};
+                    new URLSearchParams(decoded).forEach(function (v, k) {
+                      params[k] = v;
+                    });
+                    window.__imaAdRequest = { cust_params: params };
+                  } catch (e) {}
+                }
+
+                var _origXhrOpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function (method, url) {
+                  _captureImaUrl(url);
+                  return _origXhrOpen.apply(this, arguments);
+                };
+
+                var _origFetch = window.fetch;
+                window.fetch = function (resource, init) {
+                  _captureImaUrl(
+                    typeof resource === 'string' ? resource : (resource && resource.url) || ''
+                  );
+                  return _origFetch.apply(this, arguments);
+                };
+              } catch (e) {}
+            })();
+        """)
 
         # ---- Init script: hook Prebid events on every page ----
         # This runs before any page scripts and makes sure that once pbjs is
@@ -323,6 +401,7 @@ class BrowserManager:
             "build": build_name,
             "browserstack.username": username,
             "browserstack.accessKey": access_key,
+            "browserstack.video": False,
         }
         if geo and geo in _GEO_TO_BS:
             caps["browserstack.geoLocation"] = _GEO_TO_BS[geo]
