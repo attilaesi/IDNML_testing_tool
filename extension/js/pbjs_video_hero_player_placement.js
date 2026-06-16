@@ -2,6 +2,7 @@ window.__adTests = window.__adTests || {};
 window.__adTests["pbjs_video_hero_player_placement"] = () => {
   const w = window;
 
+  // Read pageType early — drives expected plcmt value.
   let pageType = null;
   try {
     const pubads = w.googletag && googletag.pubads ? googletag.pubads() : null;
@@ -11,6 +12,8 @@ window.__adTests["pbjs_video_hero_player_placement"] = () => {
     }
   } catch (e) {}
 
+  // placement is always 1.
+  // plcmt: tv_hub pages = 1 (instream); video / liveblog pages = 2 (accompanying content).
   const expectedPlacement = 1;
   const expectedPlcmt = (pageType === "tv_hub") ? 1 : 2;
 
@@ -23,7 +26,13 @@ window.__adTests["pbjs_video_hero_player_placement"] = () => {
     eventsLen: 0,
     bidRequestedEvents: 0,
     heroBidsTotal: 0,
+
+    // perBidder[bidder] = {
+    //   bids, placement_values, placement_paths, plcmt_values, plcmt_paths,
+    //   missingPlacement, missingPlcmt, invalidPlacement, invalidPlcmt
+    // }
     perBidder: {},
+
     debug: { firstHeroBidSample: null }
   };
 
@@ -90,7 +99,7 @@ window.__adTests["pbjs_video_hero_player_placement"] = () => {
   const bidRequested = events.filter(e => e && e.type === "bidRequested" && e.args);
   diag.bidRequestedEvents = bidRequested.length;
 
-  const HERO = "hero_player";
+  const HERO = "hero_player".toLowerCase();
 
   bidRequested.forEach(ev => {
     const bidsArr = Array.isArray(ev.args?.bids) ? ev.args.bids : [];
@@ -101,9 +110,9 @@ window.__adTests["pbjs_video_hero_player_placement"] = () => {
       diag.heroBidsTotal += 1;
 
       const bidder =
-        (bid.bidder          && String(bid.bidder))          ||
-        (ev.args.bidderCode  && String(ev.args.bidderCode))  ||
-        (ev.args.bidder      && String(ev.args.bidder))      ||
+        (bid.bidder      && String(bid.bidder))      ||
+        (ev.args.bidderCode && String(ev.args.bidderCode)) ||
+        (ev.args.bidder  && String(ev.args.bidder))  ||
         "unknown";
 
       const b = ensureBidder(bidder);
@@ -120,11 +129,11 @@ window.__adTests["pbjs_video_hero_player_placement"] = () => {
       const placementInt = toIntOrNull(placementObj.value);
       const plcmtInt     = toIntOrNull(plcmtObj.value);
 
-      if (placementObj.value == null)              b.missingPlacement += 1;
-      else if (placementInt !== expectedPlacement)  b.invalidPlacement += 1;
+      if (placementObj.value == null)           b.missingPlacement += 1;
+      else if (placementInt !== expectedPlacement) b.invalidPlacement += 1;
 
-      if (plcmtObj.value == null)                  b.missingPlcmt += 1;
-      else if (plcmtInt !== expectedPlcmt)          b.invalidPlcmt += 1;
+      if (plcmtObj.value == null)               b.missingPlcmt += 1;
+      else if (plcmtInt !== expectedPlcmt)       b.invalidPlcmt += 1;
 
       if (!diag.debug.firstHeroBidSample) {
         const video = bid?.mediaTypes?.video ?? {};
@@ -132,11 +141,15 @@ window.__adTests["pbjs_video_hero_player_placement"] = () => {
           bidder, adUnitCode: bid.adUnitCode,
           placement: placementObj.value, placementPath: placementObj.path,
           plcmt: plcmtObj.value, plcmtPath: plcmtObj.path,
-          videoPreview: { placement: video.placement, plcmt: video.plcmt }
+          videoPreview: {
+            placement: video.placement,
+            plcmt:     video.plcmt,
+          }
         };
       }
     });
   });
 
   return diag;
-};
+}
+;

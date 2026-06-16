@@ -45,6 +45,7 @@ const TEST_FILES = [
   "js/pbjs_consent_integration.js",
   "js/pbjs_identity_modules.js",
   "js/pbjs_display_price_floors.js",
+  "js/pbjs_display_get_floors.js",
   "js/pbjs_video_price_floors.js",
   "js/pbjs_display_pubcid_presence.js",
   "js/pbjs_video_pubcid_presence.js",

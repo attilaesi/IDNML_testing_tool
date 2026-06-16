@@ -252,6 +252,10 @@ class SupabaseResultsWriter:
         curr_map = {(r["test_name"], r["device"]): r for r in current_rows}
         prev_map = {(r["test_name"], r["device"]): r for r in prev_rows}
 
+        # Keys that exist in the current run but had no row at all in the previous run.
+        # These are not regressions — the test simply didn't exist before.
+        newly_added_keys = set(curr_map.keys()) - set(prev_map.keys())
+
         def _entry(r):
             return {
                 "test_name":     r["test_name"],
@@ -259,11 +263,22 @@ class SupabaseResultsWriter:
                 "error_summary": r.get("error_summary"),
             }
 
+        def _entry_new(r):
+            return {
+                "test_name":     r["test_name"],
+                "device":        r["device"],
+                "status":        r.get("status", ""),
+                "error_summary": r.get("error_summary"),
+            }
+
         return {
             "no_previous_run":        False,
             "previous_run_timestamp": prev_timestamp,
             "geo":                    geo,
-            "new_failures":   sorted([_entry(curr_map[k]) for k in curr_failing - prev_failing],
+            "newly_added":    sorted([_entry_new(curr_map[k]) for k in newly_added_keys],
+                                     key=lambda x: (x["test_name"], x["device"])),
+            "new_failures":   sorted([_entry(curr_map[k])
+                                      for k in (curr_failing - prev_failing) - newly_added_keys],
                                      key=lambda x: (x["test_name"], x["device"])),
             "known_failures": sorted([_entry(curr_map[k]) for k in curr_failing & prev_failing],
                                      key=lambda x: (x["test_name"], x["device"])),

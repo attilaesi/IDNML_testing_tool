@@ -9,4 +9,5 @@ window.__adTests["ima_abs"] = () => {
     var s = String(val).trim();
     return s ? [s] : [''];
   } catch (e) { return null; }
-};
+}
+;

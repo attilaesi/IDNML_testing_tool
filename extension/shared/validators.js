@@ -24,21 +24,35 @@ const VALIDATORS = {
     return errors;
   },
 
-  "pbjs_display_bidder_presence": (data) => {
+  "pbjs_display_bidder_presence": (data, allResults, dbContext) => {
     const errors = [];
     if (!data || !data.hasPbjs) { errors.push("window.pbjs not present; cannot run display bidder presence test."); return errors; }
-    if (parseInt(data.bidRequestedEvents || 0, 10) === 0) errors.push("No DISPLAY bidRequested events captured. Prebid may not have fired yet.");
+    if (parseInt(data.bidRequestedEvents || 0, 10) === 0) {
+      errors.push("No DISPLAY bidRequested events captured. Prebid may not have fired yet.");
+      return errors;
+    }
+    if (dbContext && dbContext.bidders && dbContext.bidders.length) {
+      const observed = new Set((data.biddersFromRequests || []).map(b => String(b).toLowerCase()));
+      const missing = dbContext.bidders.filter(b => !observed.has(String(b).toLowerCase()));
+      if (missing.length) errors.push("Expected bidders not observed: " + missing.join(", "));
+    }
     return errors;
   },
 
-  "pbjs_video_bidder_presence": (data, allResults) => {
+  "pbjs_video_bidder_presence": (data, allResults, dbContext) => {
     if (!data || !data.hasPbjs) return ["window.pbjs not present; cannot run video bidder presence test."];
     if (parseInt(data.heroBidRequestedEvents || 0, 10) === 0) {
       return _isVideoPage(allResults)
         ? ["No hero_player VIDEO bidRequested events found (video page — expected video activity)."]
         : null; // SKIP — no video on this page type
     }
-    return [];
+    const errors = [];
+    if (dbContext && dbContext.bidders && dbContext.bidders.length) {
+      const observed = new Set((data.biddersFromHeroRequests || []).map(b => String(b).toLowerCase()));
+      const missing = dbContext.bidders.filter(b => !observed.has(String(b).toLowerCase()));
+      if (missing.length) errors.push("Expected video bidders not observed: " + missing.join(", "));
+    }
+    return errors;
   },
 
   "pbjs_display_auction_activity": (data) => {
@@ -94,49 +108,113 @@ const VALIDATORS = {
     return userIds.length ? [] : ["No identity modules found in pbjs.getConfig().userSync.userIds"];
   },
 
-  "pbjs_display_price_floors": (data) => {
+  "pbjs_display_price_floors": (data, allResults, dbContext) => {
+    if (!data || !data.hasPbjs) return ["window.pbjs not present"];
+    if (!data.has_display_store || !parseInt(data.display_bidrequested_events || 0, 10)) {
+      return ["No DISPLAY Prebid activity observed — cannot check floor values."];
+    }
     const errors = [];
-    const floors = (data && data.prebid_floors_display) ? data.prebid_floors_display : (data || {});
-    for (const e of (floors.errors || [])) errors.push("Extraction warning: " + e);
-    if (!floors.has_display_store || parseInt(floors.display_bidrequested_events || 0, 10) === 0) {
-      errors.push("No display Prebid activity observed."); return errors;
+    for (const e of (data.errors || [])) errors.push("JS error: " + e);
+
+    const units = data.ad_units || [];
+    const floors = data.configured_floors || {};
+
+    if (!units.length) {
+      errors.push("No banner ad units found in pbjs.adUnits.");
+      return errors;
     }
-    const hasCfg = Boolean(floors.has_floors_config), enabled = Boolean(floors.enabled);
-    if (!floors.module_present && !hasCfg) {
-      errors.push("Display floors: priceFloors module not installed and no floors config present");
-    } else if (floors.module_present && !hasCfg) {
-      errors.push("Display floors: module installed but no floors config found in pbjs.getConfig() — display bids are happening without floors");
-    } else if (hasCfg && !enabled) {
-      errors.push("Display floors: floors config present but disabled");
-    } else if (hasCfg && enabled && !parseInt(floors.rules_count || 0, 10)) {
-      errors.push("Display floors: no floor rules configured");
-    } else if (hasCfg && enabled && !parseInt(floors.display_applicable_rules_count || 0, 10)) {
-      errors.push("Display floors: no display-applicable floor rules found");
+
+    const nullKeys = Object.keys(floors).filter(k => floors[k] === null);
+    if (nullKeys.length) errors.push("No floor configured on: " + nullKeys.join(", "));
+
+    if (dbContext && dbContext.floors) {
+      const TOL = 0.001;
+      const wrong = [];
+      for (const [key, actual] of Object.entries(floors)) {
+        if (actual === null) continue;
+        const expected = dbContext.floors[key] ?? null;
+        if (expected != null && Math.abs(actual - expected) > TOL) {
+          wrong.push(key + ": got " + actual.toFixed(4) + ", expected " + expected.toFixed(4));
+        }
+      }
+      if (wrong.length) errors.push("Floor value mismatch: " + wrong.join("; "));
     }
+
     return errors;
   },
 
-  "pbjs_video_price_floors": (data, allResults) => {
+  "pbjs_display_get_floors": (data, allResults, dbContext) => {
+    if (!data || !data.hasPbjs) return null; // SKIP — pbjs not available
+    if (!data.has_display_store || !parseInt(data.display_bidrequested_events || 0, 10)) return null; // SKIP
+
+    if (!data.get_floors_available) {
+      return ["bid.getFloor is not a function on any observed bid — priceFloors module not active."];
+    }
+
     const errors = [];
-    const floors = (data && data.prebid_floors_video) ? data.prebid_floors_video : (data || {});
-    for (const e of (floors.errors || [])) errors.push("Extraction warning: " + e);
-    if (!floors.has_video_store || parseInt(floors.video_bidrequested_events || 0, 10) === 0) {
+    const resultsPerUnit = data.results_per_unit || {};
+    const without = data.units_without_floor || [];
+    const withFloor = data.units_with_floor || [];
+
+    for (const unit of without) {
+      const info = resultsPerUnit[unit] || {};
+      errors.push(unit + ": getFloors() failed — " + (info.error || "no floor returned"));
+    }
+
+    if (dbContext && dbContext.floors) {
+      const TOL = 0.001;
+      const wrong = [];
+      for (const unit of withFloor) {
+        const info = resultsPerUnit[unit] || {};
+        const actual = info.floor;
+        if (actual == null) continue;
+        const key = unit + "|banner";
+        const expected = dbContext.floors[key] ?? null;
+        if (expected != null && Math.abs(actual - expected) > TOL) {
+          wrong.push(unit + ": getFloors()=" + actual.toFixed(4) + ", expected=" + expected.toFixed(4));
+        }
+      }
+      if (wrong.length) errors.push("Floor value mismatch: " + wrong.join("; "));
+    }
+
+    return errors;
+  },
+
+  "pbjs_video_price_floors": (data, allResults, dbContext) => {
+    if (!data || !data.hasPbjs) return ["window.pbjs not present"];
+    if (!data.has_video_store || !parseInt(data.video_bidrequested_events || 0, 10)) {
       return _isVideoPage(allResults)
-        ? ["No video Prebid activity observed (video page — poller waited but no video events fired)."]
+        ? ["No VIDEO Prebid activity observed on video page."]
         : null; // SKIP — no video on this page type
     }
-    const hasCfg = Boolean(floors.has_floors_config), enabled = Boolean(floors.enabled);
-    if (!floors.module_present && !hasCfg) {
-      errors.push("Video floors: priceFloors module not installed and no floors config present");
-    } else if (floors.module_present && !hasCfg) {
-      errors.push("Video floors: module installed but no floors config found in pbjs.getConfig() — video bids are happening without floors");
-    } else if (hasCfg && !enabled) {
-      errors.push("Video floors: floors config present but disabled");
-    } else if (hasCfg && enabled && !parseInt(floors.rules_count || 0, 10)) {
-      errors.push("Video floors: no floor rules configured");
-    } else if (hasCfg && enabled && !parseInt(floors.video_applicable_rules_count || 0, 10)) {
-      errors.push("Video floors: no video-applicable floor rules found");
+    const errors = [];
+    for (const e of (data.errors || [])) errors.push("JS error: " + e);
+
+    const units = data.ad_units || [];
+    const floors = data.configured_floors || {};
+
+    if (!units.length) {
+      return _isVideoPage(allResults)
+        ? ["No video ad units found in pbjs.adUnits."]
+        : null;
     }
+
+    const nullKeys = Object.keys(floors).filter(k => floors[k] === null);
+    if (nullKeys.length) errors.push("No floor configured on: " + nullKeys.join(", "));
+
+    if (dbContext && dbContext.floors) {
+      const TOL = 0.001;
+      const wrong = [];
+      for (const [key, actual] of Object.entries(floors)) {
+        if (actual === null) continue;
+        const expected = dbContext.floors[key] ?? null;
+        if (expected != null && Math.abs(actual - expected) > TOL) {
+          wrong.push(key + ": got " + actual.toFixed(4) + ", expected " + expected.toFixed(4));
+        }
+      }
+      if (wrong.length) errors.push("Video floor value mismatch: " + wrong.join("; "));
+    }
+
     return errors;
   },
 

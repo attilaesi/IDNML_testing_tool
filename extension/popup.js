@@ -13,6 +13,7 @@ const CATEGORIES = {
     "pbjs_consent_integration",
     "pbjs_identity_modules",
     "pbjs_display_price_floors",
+    "pbjs_display_get_floors",
     "pbjs_video_price_floors",
     "pbjs_display_pubcid_presence",
     "pbjs_video_pubcid_presence",
@@ -81,6 +82,7 @@ const TEST_FILES = [
   "js/pbjs_consent_integration.js",
   "js/pbjs_identity_modules.js",
   "js/pbjs_display_price_floors.js",
+  "js/pbjs_display_get_floors.js",
   "js/pbjs_video_price_floors.js",
   "js/pbjs_display_pubcid_presence.js",
   "js/pbjs_video_pubcid_presence.js",
@@ -126,6 +128,127 @@ const TEST_FILES = [
   "js/ima_bsc.js",
   "js/ima_abs.js",
 ];
+
+// ── Supabase helpers ──────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://jcrcmwyidwsoakfearwg.supabase.co";
+const SUPABASE_ANON_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjcmNtd3lpZHdzb2FrZmVhcndnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxMTE0MTksImV4cCI6MjA3OTY4NzQxOX0.1oW4JWzvA1CR6IPKoQEZWqhB0pytnHgXMTwTCv8LALg";
+const _SB_HEADERS = {
+  apikey: SUPABASE_ANON_KEY,
+  Authorization: "Bearer " + SUPABASE_ANON_KEY,
+};
+
+function _derivePubEnv(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes("uat-web.independent.co.uk") || host.includes("staging-web.independent.co.uk"))
+      return { publisher: "independent", env: "uat" };
+    if (host.endsWith("independent.co.uk")) return { publisher: "independent", env: "prod" };
+    if (host.endsWith("standard.co.uk"))    return { publisher: "evening_standard", env: "prod" };
+  } catch (e) {}
+  return { publisher: null, env: null };
+}
+
+function _extractGeo(results) {
+  const d = results.pbjs_display_bidder_presence
+         || results.pbjs_display_price_floors
+         || results.pbjs_display_get_floors;
+  if (!d) return null;
+  const loc = String(d.locale || "").toUpperCase().trim();
+  return ["UK", "US", "CAN", "ROW"].includes(loc) ? loc : (loc ? "ROW" : null);
+}
+
+function _extractDevice(results) {
+  const d = results.env_is_mobile_or_tablet;
+  if (!d) return null;
+  const val = typeof d === "object" ? String(d.cookie_value || "") : String(d);
+  return val.trim() === "true" ? "mobile" : "desktop";
+}
+
+function _extractPageType(results) {
+  const d = results.gpt_page_type;
+  if (!d) return null;
+  const vals = Array.isArray(d) ? d : ((d && d.pageType) || []);
+  const raw = String(vals[0] || "").toLowerCase().trim();
+  const MAP = {
+    article: "image_article", video: "video_article",
+    homepage: "index", index: "index",
+    blog: "blog_article", quiz: "quiz_article", gallery: "gallery_article",
+  };
+  return MAP[raw] || null;
+}
+
+async function _buildDbContext(tabUrl, results) {
+  const ctx = { floors: null, floorsElse: null, bidders: null };
+  const { publisher, env } = _derivePubEnv(tabUrl || "");
+  if (!publisher) return ctx;
+
+  const geo = _extractGeo(results);
+
+  // Floor prices — fetch banner + video rows for this publisher/geo in one request
+  if (geo) {
+    try {
+      const pubDomain = publisher === "independent"     ? "independent.co.uk"
+                      : publisher === "evening_standard" ? "standard.co.uk"
+                      : publisher + ".co.uk";
+      const params = new URLSearchParams({
+        select: "geo,ad_unit,media_type,floor_usd",
+        publisher: "eq." + pubDomain,
+        geo: "in.(" + geo + ",ELSE)",
+      });
+      const res = await fetch(SUPABASE_URL + "/rest/v1/prebid_floor_prices?" + params, {
+        headers: _SB_HEADERS,
+      });
+      if (res.ok) {
+        const rows = await res.json();
+        ctx.floors = {};
+        for (const r of (rows || [])) {
+          const rowGeo    = String(r.geo       || "").toUpperCase();
+          const adUnit    = String(r.ad_unit   || "").trim();
+          const mediaType = String(r.media_type || "").trim();
+          const floor     = parseFloat(r.floor_usd);
+          if (isNaN(floor)) continue;
+          if (rowGeo === "ELSE" && adUnit === "ELSE") {
+            ctx.floorsElse = floor;
+          } else if (rowGeo === geo) {
+            ctx.floors[adUnit + "|" + mediaType] = floor;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  // Expected bidders from profile
+  const device   = _extractDevice(results);
+  const pageType = _extractPageType(results);
+  const geoLower = geo === "UK" ? "uk" : geo === "US" ? "us" : "row";
+
+  if (geo && device && pageType) {
+    try {
+      const res = await fetch(SUPABASE_URL + "/rest/v1/rpc/get_profile_bidders", {
+        method: "POST",
+        headers: { ..._SB_HEADERS, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          p_publisher_code: publisher,
+          p_env_code:       env,
+          p_geo_code:       geoLower,
+          p_device_code:    device,
+          p_page_type_code: pageType,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          ctx.bidders = data
+            .map(item => typeof item === "string" ? item : (item.bidder_code || item.code || ""))
+            .filter(Boolean);
+        }
+      }
+    } catch (e) {}
+  }
+
+  return ctx;
+}
 
 // Self-contained runner (same logic as background.js runAllTests, no closures)
 function runAllTests() {
@@ -178,7 +301,8 @@ function _formatJson(data) {
   } catch (_) { return String(data); }
 }
 
-function renderResults(results, runAt) {
+function renderResults(results, runAt, dbContext) {
+  dbContext = dbContext || {};
   hideStates();
   const resultsEl = document.getElementById("results");
   const summaryEl = document.getElementById("summary");
@@ -239,7 +363,7 @@ function renderResults(results, runAt) {
           badge.className += " badge-info";
           badge.textContent = "INFO";
         } else {
-          const errors = validator(data, results);
+          const errors = validator(data, results, dbContext);
           if (errors === null) {
             badge.className += " badge-skip";
             badge.textContent = "SKIP";
@@ -266,7 +390,7 @@ function renderResults(results, runAt) {
             const validator = VALIDATORS[name];
             if (!validator) { status = "INFO"; }
             else {
-              const ve = validator(data, results);
+              const ve = validator(data, results, dbContext);
               if (ve === null)       { status = "SKIP"; }
               else if (ve.length === 0) { status = "PASS"; }
               else                   { status = "FAIL"; errors = ve; }
@@ -367,7 +491,8 @@ async function triggerRerun(tabId) {
     const results = injection?.result ?? {};
     const runAt = new Date().toLocaleTimeString();
     await chrome.storage.local.set({ [storageKey]: { url, status: "done", results, timestamp: Date.now(), runAt } });
-    renderResults(results, runAt);
+    const dbContext = await _buildDbContext(url, results);
+    renderResults(results, runAt, dbContext);
   } catch (e) {
     showState("state-error");
     document.getElementById("state-error").textContent = "Run failed: " + e.message;
@@ -444,7 +569,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     if (entry.status === "done") {
-      renderResults(entry.results, entry.runAt);
+      const dbContext = await _buildDbContext(tab.url, entry.results);
+      renderResults(entry.results, entry.runAt, dbContext);
     }
   };
 

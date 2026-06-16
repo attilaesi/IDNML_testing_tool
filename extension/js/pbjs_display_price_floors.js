@@ -1,180 +1,78 @@
 window.__adTests = window.__adTests || {};
 window.__adTests["pbjs_display_price_floors"] = () => {
   const out = {
-    // observed activity
+    hasPbjs: false,
+    locale: null,
+
     has_display_store: false,
-    display_events_total: 0,
     display_bidrequested_events: 0,
-    display_auctioninit_events: 0,
-    display_auctionend_events: 0,
 
-    // floors snapshot
-    has_pbjs: false,
-    has_getConfig: false,
-    module_present: false,
-    installed_modules: null,
+    floors_currency: null,
 
-    has_floors_config: false,
-    enabled: false,
-    provider: null,
-    rules_count: 0,
-    display_applicable_rules_count: 0,
+    // [{code, short_code}] — banner ad units only
+    ad_units: [],
 
-    raw_config: null,
-    errors: []
+    // {"short_code|banner": <floor_usd | null>}
+    // null means adUnit.floors is missing or has no banner value
+    configured_floors: {},
+
+    errors: [],
   };
 
-  const safeObjKeys = (o) => {
-    try { return o && typeof o === 'object' ? Object.keys(o) : []; }
-    catch (e) { return []; }
-  };
-
-  const getFloorsCfg = (pbjs) => {
-    let floorsCfg = null;
-    try {
-      floorsCfg = pbjs.getConfig ? pbjs.getConfig('floors') : null;
-    } catch (e) {}
-
-    // Some stacks nest under full config
-    try {
-      if (!floorsCfg || (typeof floorsCfg === 'object' && safeObjKeys(floorsCfg).length === 0)) {
-        const fullCfg = pbjs.getConfig ? (pbjs.getConfig() || {}) : {};
-        if (fullCfg && fullCfg.floors) floorsCfg = fullCfg.floors;
-      }
-    } catch (e) {}
-
-    return floorsCfg || null;
-  };
-
-  const getValuesObj = (floorsCfg) => {
-    try {
-      return (floorsCfg && floorsCfg.data && floorsCfg.data.values) ||
-             (floorsCfg && floorsCfg.values) ||
-             null;
-    } catch (e) {
-      return null;
-    }
-  };
-
-  const looksBannerApplicable = (ruleObj) => {
-    // Heuristic:
-    // - if rule has explicit mediaType/mediaTypes and includes banner -> banner-applicable
-    // - if no mediaType/mediaTypes -> assume generic (applies-to-all) -> banner-applicable
-    try {
-      if (!ruleObj || typeof ruleObj !== 'object') return true;
-
-      const mt = ruleObj.mediaType;
-      if (typeof mt === 'string') {
-        return mt.toLowerCase() === 'banner';
-      }
-
-      const mts = ruleObj.mediaTypes;
-      if (Array.isArray(mts)) {
-        return mts.map(x => String(x || '').toLowerCase()).includes('banner');
-      }
-
-      // Some configs use "type"
-      const t = ruleObj.type;
-      if (typeof t === 'string') {
-        const tl = t.toLowerCase();
-        if (tl === 'banner' || tl === 'display') return true;
-      }
-
-      // No explicit media type => treat as generic
-      return true;
-    } catch (e) {
-      return true;
-    }
-  };
-
-  // ------------------------------------------------------------
-  // 1) DISPLAY STORE OBSERVATION
-  // ------------------------------------------------------------
+  // ── Locale ──────────────────────────────────────────────────────────────────
   try {
-    const store = Array.isArray(window.__pbjsBidEventsDisplay) ? window.__pbjsBidEventsDisplay : null;
+    const m = document.cookie.match(/(?:^|;\s*)Locale=([^;]+)/i);
+    if (m && m[1]) out.locale = decodeURIComponent(m[1]).toUpperCase();
+  } catch (e) {}
+
+  // ── Display activity ─────────────────────────────────────────────────────────
+  try {
+    const store = Array.isArray(window.__pbjsBidEventsDisplay)
+      ? window.__pbjsBidEventsDisplay : null;
     if (store) {
       out.has_display_store = true;
-      out.display_events_total = store.length;
-
-      // count key event types
       for (let i = 0; i < store.length; i++) {
-        const ev = store[i] || {};
-        const type = (ev.type || '').toString();
-        if (type === 'bidRequested') out.display_bidrequested_events += 1;
-        if (type === 'auctionInit') out.display_auctioninit_events += 1;
-        if (type === 'auctionEnd') out.display_auctionend_events += 1;
+        if ((store[i] || {}).type === 'bidRequested') out.display_bidrequested_events += 1;
       }
     }
   } catch (e) {}
 
-  // ------------------------------------------------------------
-  // 2) FLOORS CONFIG EXTRACTION
-  // ------------------------------------------------------------
+  // ── pbjs ──────────────────────────────────────────────────────────────────────
+  const pbjs = window.pbjs;
+  if (!pbjs) { out.errors.push('window.pbjs not defined'); return out; }
+  out.hasPbjs = true;
+
+  // ── Per-unit floors ───────────────────────────────────────────────────────────
+  // Floors are configured per ad unit on adUnit.floors, not in the global config.
+  // Schema is single-field [mediaType], so the values key is just 'banner'.
   try {
-    const pbjs = window.pbjs;
-    if (!pbjs) {
-      out.errors.push('window.pbjs is not defined');
-      return out;
+    const units = Array.isArray(pbjs.adUnits) ? pbjs.adUnits : [];
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i] || {};
+      const code = String(u.code || '').trim();
+      if (!code) continue;
+      if (!(u.mediaTypes || {}).banner) continue;
+
+      const parts = code.split('/');
+      const short_code = parts[parts.length - 1].trim() || code;
+      out.ad_units.push({ code, short_code });
+
+      let floor = null;
+      try {
+        const f = u.floors;
+        if (f && f.values && typeof f.values === 'object') {
+          // Single-field schema: key is just the mediaType value ('banner' or '*')
+          floor = f.values['banner'] ?? f.values['*'] ?? null;
+          if (out.floors_currency === null && f.currency) {
+            out.floors_currency = f.currency;
+          }
+        }
+      } catch (e) {}
+
+      out.configured_floors[`${short_code}|banner`] = floor;
     }
-    out.has_pbjs = true;
-
-    // installedModules – presence of priceFloors module
-    if (Array.isArray(pbjs.installedModules)) {
-      out.installed_modules = pbjs.installedModules.slice();
-      out.module_present = pbjs.installedModules.includes('priceFloors');
-    }
-
-    if (typeof pbjs.getConfig !== 'function') {
-      out.errors.push('pbjs.getConfig is not available');
-      return out;
-    }
-    out.has_getConfig = true;
-
-    const floorsCfg = getFloorsCfg(pbjs);
-    if (!floorsCfg) {
-      out.raw_config = null;
-      out.has_floors_config = false;
-      return out;
-    }
-
-    out.raw_config = floorsCfg;
-    out.has_floors_config = true;
-
-    // Enabled flag
-    if (Object.prototype.hasOwnProperty.call(floorsCfg, 'enabled')) {
-      out.enabled = !!floorsCfg.enabled;
-    } else {
-      // default TRUE when config present
-      out.enabled = true;
-    }
-
-    // Provider (optional)
-    if (floorsCfg.data && floorsCfg.data.provider) out.provider = floorsCfg.data.provider;
-    else if (floorsCfg.provider) out.provider = floorsCfg.provider;
-
-    const valuesObj = getValuesObj(floorsCfg);
-    if (valuesObj && typeof valuesObj === 'object') {
-      const keys = Object.keys(valuesObj);
-      out.rules_count = keys.length;
-
-      // display-applicable count
-      let dcount = 0;
-      for (let i = 0; i < keys.length; i++) {
-        const k = keys[i];
-        const rule = valuesObj[k];
-        if (looksBannerApplicable(rule)) dcount += 1;
-      }
-      out.display_applicable_rules_count = dcount;
-    } else {
-      out.rules_count = 0;
-      out.display_applicable_rules_count = 0;
-    }
-
-    // Fallback: if config exists, treat module_present as true
-    if (!out.module_present && out.has_floors_config) out.module_present = true;
-
   } catch (e) {
-    out.errors.push(String(e));
+    out.errors.push('adUnits extraction: ' + String(e));
   }
 
   return out;

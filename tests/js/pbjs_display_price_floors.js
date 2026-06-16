@@ -6,15 +6,13 @@
     has_display_store: false,
     display_bidrequested_events: 0,
 
-    floors_enabled: false,
     floors_currency: null,
-    schema_fields: [],
 
-    // [{code, short_code, has_banner}] — display (banner) ad units only
+    // [{code, short_code}] — banner ad units only
     ad_units: [],
 
     // {"short_code|banner": <floor_usd | null>}
-    // null means no matching rule found in pbjs floors config
+    // null means adUnit.floors is missing or has no banner value
     configured_floors: {},
 
     errors: [],
@@ -29,8 +27,7 @@
   // ── Display activity ─────────────────────────────────────────────────────────
   try {
     const store = Array.isArray(window.__pbjsBidEventsDisplay)
-      ? window.__pbjsBidEventsDisplay
-      : null;
+      ? window.__pbjsBidEventsDisplay : null;
     if (store) {
       out.has_display_store = true;
       for (let i = 0; i < store.length; i++) {
@@ -39,103 +36,42 @@
     }
   } catch (e) {}
 
-  // ── pbjs check ───────────────────────────────────────────────────────────────
+  // ── pbjs ──────────────────────────────────────────────────────────────────────
   const pbjs = window.pbjs;
-  if (!pbjs) {
-    out.errors.push('window.pbjs not defined');
-    return out;
-  }
+  if (!pbjs) { out.errors.push('window.pbjs not defined'); return out; }
   out.hasPbjs = true;
 
-  if (typeof pbjs.getConfig !== 'function') {
-    out.errors.push('pbjs.getConfig not available');
-    return out;
-  }
-
-  // ── Collect display (banner) ad units ────────────────────────────────────────
+  // ── Per-unit floors ───────────────────────────────────────────────────────────
+  // Floors are configured per ad unit on adUnit.floors, not in the global config.
+  // Schema is single-field [mediaType], so the values key is just 'banner'.
   try {
     const units = Array.isArray(pbjs.adUnits) ? pbjs.adUnits : [];
     for (let i = 0; i < units.length; i++) {
       const u = units[i] || {};
       const code = String(u.code || '').trim();
       if (!code) continue;
-      const mt = u.mediaTypes || {};
-      if (!mt.banner) continue; // display test — banner only
-      // short_code: last path segment (strips /network/site/ prefix if present)
+      if (!(u.mediaTypes || {}).banner) continue;
+
       const parts = code.split('/');
       const short_code = parts[parts.length - 1].trim() || code;
       out.ad_units.push({ code, short_code });
+
+      let floor = null;
+      try {
+        const f = u.floors;
+        if (f && f.values && typeof f.values === 'object') {
+          // Single-field schema: key is just the mediaType value ('banner' or '*')
+          floor = f.values['banner'] ?? f.values['*'] ?? null;
+          if (out.floors_currency === null && f.currency) {
+            out.floors_currency = f.currency;
+          }
+        }
+      } catch (e) {}
+
+      out.configured_floors[`${short_code}|banner`] = floor;
     }
   } catch (e) {
     out.errors.push('adUnits extraction: ' + String(e));
-  }
-
-  // ── Floors config ─────────────────────────────────────────────────────────────
-  let floorsCfg = null;
-  try {
-    floorsCfg = pbjs.getConfig('floors') || null;
-    if (!floorsCfg || !Object.keys(floorsCfg).length) {
-      const full = pbjs.getConfig() || {};
-      floorsCfg = full.floors || null;
-    }
-  } catch (e) {
-    out.errors.push('getConfig floors: ' + String(e));
-  }
-
-  if (!floorsCfg) return out;
-
-  // enabled flag
-  out.floors_enabled = Object.prototype.hasOwnProperty.call(floorsCfg, 'enabled')
-    ? !!floorsCfg.enabled
-    : true;
-
-  const data = floorsCfg.data || floorsCfg || {};
-  out.floors_currency = (data.currency || null);
-
-  const schema = (data.schema || {});
-  out.schema_fields = Array.isArray(schema.fields) ? schema.fields.slice() : [];
-
-  const values = data.values || null;
-  if (!values || typeof values !== 'object') return out;
-
-  // ── Floor lookup per ad unit ──────────────────────────────────────────────────
-  // Tries a ranked list of key patterns, returns the first match found.
-  const domain = (window.location.hostname || '').replace(/^www\./, '');
-
-  const findFloor = (fullCode, shortCode) => {
-    const mt = 'banner';
-
-    // Ordered candidates — most specific first
-    const candidates = [
-      // 2-field schema: adUnitCode|mediaType
-      `${fullCode}|${mt}`,
-      `${shortCode}|${mt}`,
-      // 2-field with wildcard mediaType
-      `${fullCode}|*`,
-      `${shortCode}|*`,
-      // 3-field schema: domain|adUnitCode|mediaType
-      `${domain}|${fullCode}|${mt}`,
-      `${domain}|${shortCode}|${mt}`,
-      `*|${fullCode}|${mt}`,
-      `*|${shortCode}|${mt}`,
-      // generic wildcard
-      `*|${mt}`,
-      `*|*|${mt}`,
-      `*|*`,
-    ];
-
-    for (let i = 0; i < candidates.length; i++) {
-      if (Object.prototype.hasOwnProperty.call(values, candidates[i])) {
-        return values[candidates[i]];
-      }
-    }
-    return null;
-  };
-
-  for (let i = 0; i < out.ad_units.length; i++) {
-    const { code, short_code } = out.ad_units[i];
-    const key = `${short_code}|banner`;
-    out.configured_floors[key] = findFloor(code, short_code);
   }
 
   return out;

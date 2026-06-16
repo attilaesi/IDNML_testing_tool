@@ -5,4 +5,5 @@ window.__adTests["ima_strategy_player"] = () => {
     if (!player) return null;
     return [player];
   } catch (e) { return null; }
-};
+}
+;

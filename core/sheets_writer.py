@@ -41,6 +41,7 @@ _PALETTE: Dict[str, Tuple[float, float, float]] = {
     "error":      (0.878, 0.400, 0.400),
     "skip":       (0.953, 0.953, 0.953),
     "mixed":      (0.988, 0.910, 0.698),
+    "new":        (0.678, 0.847, 0.902),
     "header_dk":  (0.122, 0.220, 0.392),
     "header_md":  (0.267, 0.400, 0.600),
     "white":      (1.0,   1.0,   1.0),
@@ -1020,7 +1021,8 @@ class SheetsWriter:
             textFormat=TextFormat(foregroundColor=_c("white"), fontSize=10),
         ))
 
-        def _subsection(label: str, rows: List[dict], color_key: str, include_error: bool) -> None:
+        def _subsection(label: str, rows: List[dict], color_key: str,
+                        include_error: bool, include_status: bool = False) -> None:
             data.append([])
             r = row()
             data.append([f"{label}  ({len(rows)})"])
@@ -1034,7 +1036,12 @@ class SheetsWriter:
                 return
 
             r = row()
-            hdrs = ["Test", "Device", "Detail"] if include_error else ["Test", "Device"]
+            if include_status:
+                hdrs = ["Test", "Device", "Status", "Detail"]
+            elif include_error:
+                hdrs = ["Test", "Device", "Detail"]
+            else:
+                hdrs = ["Test", "Device"]
             data.append(hdrs)
             fmt(r, 1, r, len(hdrs), CellFormat(
                 textFormat=TextFormat(bold=True),
@@ -1042,7 +1049,14 @@ class SheetsWriter:
             ))
 
             for entry in rows:
-                if include_error:
+                if include_status:
+                    data.append([
+                        _test_name_cell(entry.get("test_name", "")),
+                        entry.get("device", ""),
+                        entry.get("status", ""),
+                        entry.get("error_summary") or "",
+                    ])
+                elif include_error:
                     data.append([
                         _test_name_cell(entry.get("test_name", "")),
                         entry.get("device", ""),
@@ -1054,13 +1068,15 @@ class SheetsWriter:
                         entry.get("device", ""),
                     ])
 
-        new_f = regression.get("new_failures", [])
-        known = regression.get("known_failures", [])
-        fixed = regression.get("fixed", [])
+        newly_added = regression.get("newly_added", [])
+        new_f  = regression.get("new_failures", [])
+        known  = regression.get("known_failures", [])
+        fixed  = regression.get("fixed", [])
 
-        _subsection("NEW FAILURES",   new_f, "fail",  include_error=True)
-        _subsection("KNOWN FAILURES", known, "mixed", include_error=True)
-        _subsection("FIXED",          fixed, "pass",  include_error=False)
+        _subsection("NEWLY ADDED TESTS", newly_added, "new",   include_error=True, include_status=True)
+        _subsection("NEW FAILURES",      new_f,       "fail",  include_error=True)
+        _subsection("KNOWN FAILURES",    known,       "mixed", include_error=True)
+        _subsection("FIXED",             fixed,       "pass",  include_error=False)
 
         total_rows = row() - 1
         fmt(1, 1, total_rows, REG_COLS, CellFormat(wrapStrategy="WRAP", verticalAlignment="TOP"))

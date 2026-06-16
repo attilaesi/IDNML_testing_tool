@@ -1,4 +1,5 @@
-() => {
+window.__adTests = window.__adTests || {};
+window.__adTests["pbjs_display_get_floors"] = () => {
   const out = {
     hasPbjs: false,
     locale: null,
@@ -116,3 +117,4 @@
 
   return out;
 }
+;
