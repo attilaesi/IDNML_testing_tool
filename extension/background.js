@@ -53,6 +53,7 @@ const TEST_FILES = [
   "js/pbjs_video_hero_player_placement.js",
   "js/pbjs_display_mantis_signals_bid.js",
   "js/pbjs_display_permutive_signals_bid.js",
+  "js/pbjs_msft_keywords.js",
   "js/gpt_page_type.js",
   "js/gpt_mantis.js",
   "js/gpt_mantis_context.js",
@@ -220,6 +221,23 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       world: "MAIN",
       func: (data) => { window.__imaAdRequest = data; },
       args: [imaData],
+    });
+
+    // Sync is_mobile_or_tablet cookie with actual screen width (fallback after hook.js)
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: () => {
+        const expected = (window.innerWidth < 1024) ? "true" : "false";
+        let current = null;
+        document.cookie.split(";").some(function (c) {
+          const t = c.trim();
+          if (t.indexOf("is_mobile_or_tablet=") === 0) { current = t.slice("is_mobile_or_tablet=".length).trim(); return true; }
+        });
+        if (current !== expected) {
+          document.cookie = "is_mobile_or_tablet=" + expected + "; path=/";
+        }
+      },
     });
 
     // Inject all test definition files

@@ -21,6 +21,7 @@ const CATEGORIES = {
     "pbjs_video_hero_player_placement",
     "pbjs_display_mantis_signals_bid",
     "pbjs_display_permutive_signals_bid",
+    "pbjs_msft_keywords",
   ],
   "GPT": [
     "gpt_page_type",
@@ -90,6 +91,7 @@ const TEST_FILES = [
   "js/pbjs_video_hero_player_placement.js",
   "js/pbjs_display_mantis_signals_bid.js",
   "js/pbjs_display_permutive_signals_bid.js",
+  "js/pbjs_msft_keywords.js",
   "js/gpt_page_type.js",
   "js/gpt_mantis.js",
   "js/gpt_mantis_context.js",
@@ -179,7 +181,7 @@ function _extractPageType(results) {
 }
 
 async function _buildDbContext(tabUrl, results) {
-  const ctx = { floors: null, floorsElse: null, bidders: null };
+  const ctx = { floors: null, floorsElse: null, displayBidders: null, videoBidders: null, geo: null, device: null };
   const { publisher, env } = _derivePubEnv(tabUrl || "");
   if (!publisher) return ctx;
 
@@ -223,27 +225,33 @@ async function _buildDbContext(tabUrl, results) {
   const pageType = _extractPageType(results);
   const geoLower = geo === "UK" ? "uk" : geo === "US" ? "us" : "row";
 
+  ctx.geo    = geo    || null;
+  ctx.device = device || null;
+
   if (geo && device && pageType) {
+    // Mirror the Python test logic: two separate queries by slot, env always "prod"
+    // (UAT/staging use prod bidder rows — same as bidder_lookup_env in Python)
+    const biddersUrl = SUPABASE_URL.replace(/\/$/, "") + "/rest/v1/bidder_configs_enriched";
+    const baseParams = {
+      select:      "bidder",
+      publisher:   "eq." + publisher,
+      environment: "eq.prod",
+      geo:         "eq." + geoLower,
+      device:      "eq." + (device === "tablet" ? "mobile" : device),
+      page_type:   "eq." + pageType,
+      is_expected: "eq.true",
+    };
+
+    const _parseBidders = (data) =>
+      [...new Set((data || []).map(r => (typeof r === "string" ? r : r.bidder) || "").filter(Boolean))];
+
     try {
-      const res = await fetch(SUPABASE_URL + "/rest/v1/rpc/get_profile_bidders", {
-        method: "POST",
-        headers: { ..._SB_HEADERS, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          p_publisher_code: publisher,
-          p_env_code:       env,
-          p_geo_code:       geoLower,
-          p_device_code:    device,
-          p_page_type_code: pageType,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          ctx.bidders = data
-            .map(item => typeof item === "string" ? item : (item.bidder_code || item.code || ""))
-            .filter(Boolean);
-        }
-      }
+      const [displayRes, videoRes] = await Promise.all([
+        fetch(biddersUrl + "?" + new URLSearchParams({ ...baseParams, slot: "neq.hero_player" }), { headers: _SB_HEADERS }),
+        fetch(biddersUrl + "?" + new URLSearchParams({ ...baseParams, slot: "eq.hero_player"  }), { headers: _SB_HEADERS }),
+      ]);
+      if (displayRes.ok) ctx.displayBidders = _parseBidders(await displayRes.json());
+      if (videoRes.ok)   ctx.videoBidders   = _parseBidders(await videoRes.json());
     } catch (e) {}
   }
 
@@ -269,6 +277,29 @@ function truncateUrl(url, maxLen = 55) {
   return url.slice(0, maxLen - 3) + "…";
 }
 
+function renderContextChips(el, tabUrl, results) {
+  const { publisher, env } = _derivePubEnv(tabUrl || "");
+  const geo    = _extractGeo(results);
+  const device = _extractDevice(results);
+
+  const gptData = results && results.gpt_page_type;
+  const rawPageType = (() => {
+    if (!gptData) return null;
+    const vals = Array.isArray(gptData) ? gptData : ((gptData && gptData.pageType) || []);
+    return String(vals[0] || "").toLowerCase().trim() || null;
+  })();
+
+  const parts = [];
+  if (geo)         parts.push(geo);
+  if (device)      parts.push(device);
+  if (rawPageType) parts.push(rawPageType);
+  if (publisher)   parts.push(publisher);
+  if (env && env !== "prod") parts.push(env);
+
+  el.textContent = parts.length ? parts.join(" · ") : "—";
+  el.title = tabUrl || "";
+}
+
 function showState(id) {
   for (const sid of ["state-running", "state-waiting", "state-error"]) {
     document.getElementById(sid).style.display = sid === id ? "flex" : "none";
@@ -283,6 +314,36 @@ function hideStates() {
 
 // Last rendered payload — populated by renderResults(), read by copy button.
 let _copyPayload = null;
+
+function buildTextReport(payload) {
+  if (!payload) return "";
+  const context = document.getElementById("tab-url").textContent || "";
+  const url     = payload.url || "";
+  const runAt   = payload.run_at || "";
+  const s       = payload.summary || {};
+  const results = payload.results || {};
+
+  const lines = [];
+  lines.push("Ad Inspector — " + (runAt ? runAt + " | " : "") + context);
+  lines.push(s.passed + " passed / " + s.failed + " failed / " + s.no_data + " no data");
+  if (url) lines.push(url);
+
+  for (const [category, testNames] of Object.entries(CATEGORIES)) {
+    lines.push("");
+    lines.push("── " + category + " " + "─".repeat(Math.max(2, 34 - category.length)));
+    for (const name of testNames) {
+      const r = results[name];
+      if (!r) continue;
+      const label = name.replace(/_/g, " ");
+      lines.push(r.status.padEnd(6) + label);
+      if (r.errors && r.errors.length) {
+        for (const e of r.errors) lines.push("       → " + e);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
 
 function _stripNoise(data) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return data;
@@ -492,6 +553,7 @@ async function triggerRerun(tabId) {
     const runAt = new Date().toLocaleTimeString();
     await chrome.storage.local.set({ [storageKey]: { url, status: "done", results, timestamp: Date.now(), runAt } });
     const dbContext = await _buildDbContext(url, results);
+    renderContextChips(document.getElementById("tab-url"), url, results);
     renderResults(results, runAt, dbContext);
   } catch (e) {
     showState("state-error");
@@ -525,6 +587,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   const storageKey = `tab_${tab.id}`;
 
   rerunBtn.addEventListener("click", () => triggerRerun(tab.id));
+
+  const copyReportBtn = document.getElementById("copy-report-btn");
+  copyReportBtn.addEventListener("click", async () => {
+    if (!_copyPayload) return;
+    try {
+      await navigator.clipboard.writeText(buildTextReport(_copyPayload));
+      copyReportBtn.textContent = "Copied!";
+      setTimeout(() => { copyReportBtn.textContent = "Copy report"; }, 2000);
+    } catch (_) {
+      copyReportBtn.textContent = "Failed";
+      setTimeout(() => { copyReportBtn.textContent = "Copy report"; }, 2000);
+    }
+  });
 
   const copyBtn = document.getElementById("copy-btn");
   copyBtn.addEventListener("click", async () => {
@@ -570,6 +645,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (entry.status === "done") {
       const dbContext = await _buildDbContext(tab.url, entry.results);
+      renderContextChips(urlEl, tab.url, entry.results);
       renderResults(entry.results, entry.runAt, dbContext);
     }
   };

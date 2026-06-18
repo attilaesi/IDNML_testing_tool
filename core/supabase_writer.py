@@ -82,21 +82,24 @@ def _aggregate(results: List[TestResult], run_id: str, timestamp: str) -> List[D
             status = "SKIP"
 
         error_summary = None
+        error_details = []
         for r in group:
             if r.state in FAILING and r.errors:
-                error_summary = str(r.errors[0]).strip().splitlines()[0][:500]
-                break
+                if error_summary is None:
+                    error_summary = str(r.errors[0]).strip().splitlines()[0][:500]
+                error_details.extend([str(e).strip() for e in r.errors])
 
         rows.append({
-            "run_id":       run_id,
-            "timestamp":    timestamp,
-            "geo":          geo,
-            "device":       device,
-            "publisher":    publisher,
-            "environment":  env,
-            "test_name":    test_name,
-            "status":       status,
+            "run_id":        run_id,
+            "timestamp":     timestamp,
+            "geo":           geo,
+            "device":        device,
+            "publisher":     publisher,
+            "environment":   env,
+            "test_name":     test_name,
+            "status":        status,
             "error_summary": error_summary,
+            "error_details": error_details or None,
         })
 
     return rows
@@ -176,12 +179,15 @@ class SupabaseResultsWriter:
         if not self.url or not self.key:
             return None
 
+        # Filter by publisher + geo only — environment is intentionally excluded so that
+        # prod and uat runs are compared against each other within the same publisher/geo.
         base_filter = {
-            "publisher":   f"eq.{publisher}",
-            "environment": f"eq.{environment}",
-            "geo":         f"eq.{geo}",
+            "publisher": f"eq.{publisher}",
+            "geo":       f"eq.{geo}",
         }
         headers = self._headers()
+
+        print(f"   [regression] publisher={publisher!r}  geo={geo!r}  (environment={environment!r} not used as filter)")
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -200,33 +206,62 @@ class SupabaseResultsWriter:
                         return None
                     current_rows = await resp.json()
 
-                # 2. Most recent previous run_id (one row, just need id + timestamp)
+                # 2. Look for a pinned baseline first; fall back to most recent previous run
+                baselines_url = self.url.rstrip("/") + "/rest/v1/regression_baselines"
+                pivot = []
+                using_baseline = False
+
                 async with session.get(
-                    self._api_url,
-                    params={
-                        **base_filter,
-                        "run_id": f"neq.{run_id}",
-                        "select": "run_id,timestamp",
-                        "order":  "timestamp.desc",
-                        "limit":  "1",
-                    },
+                    baselines_url,
+                    params={"publisher": f"eq.{publisher}", "geo": f"eq.{geo}",
+                            "select": "baseline_run_id,set_at"},
                     headers=headers,
                 ) as resp:
-                    if not resp.ok:
-                        return None
-                    pivot = await resp.json()
+                    bl = (await resp.json()) if resp.ok else []
+
+                if bl and bl[0].get("baseline_run_id") and bl[0]["baseline_run_id"] != run_id:
+                    baseline_run_id = bl[0]["baseline_run_id"]
+                    print(f"   [regression] using pinned baseline {baseline_run_id} (set {bl[0].get('set_at', '')})")
+                    async with session.get(
+                        self._api_url,
+                        params={"run_id": f"eq.{baseline_run_id}",
+                                "select": "run_id,timestamp", "limit": "1"},
+                        headers=headers,
+                    ) as resp:
+                        if resp.ok:
+                            pivot = await resp.json()
+                    using_baseline = True
 
                 if not pivot:
+                    # Fall back: most recent previous run — try publisher+geo first, then publisher only
+                    if using_baseline:
+                        print("   [regression] ⚠️  baseline run not found in results table; falling back to most recent")
+                    for params in [
+                        {**base_filter, "run_id": f"neq.{run_id}",
+                         "select": "run_id,timestamp", "order": "timestamp.desc", "limit": "1"},
+                        {"publisher": f"eq.{publisher}", "run_id": f"neq.{run_id}",
+                         "select": "run_id,timestamp", "order": "timestamp.desc", "limit": "1"},
+                    ]:
+                        async with session.get(self._api_url, params=params, headers=headers) as resp:
+                            if not resp.ok:
+                                return None
+                            pivot = await resp.json()
+                        if pivot:
+                            print(f"   [regression] using most recent run {pivot[0]['run_id']}")
+                            break
+
+                if not pivot:
+                    print("   [regression] no previous run found in DB")
                     return {"no_previous_run": True}
 
                 prev_run_id = pivot[0]["run_id"]
                 prev_timestamp = pivot[0]["timestamp"]
+                print(f"   [regression] comparing against run {prev_run_id} ({prev_timestamp})")
 
-                # 3. Previous run rows
+                # 3. Previous run rows — filter only by run_id (geo may differ)
                 async with session.get(
                     self._api_url,
                     params={
-                        **base_filter,
                         "run_id": f"eq.{prev_run_id}",
                         "select": "test_name,device,status,error_summary",
                     },
@@ -274,6 +309,8 @@ class SupabaseResultsWriter:
         return {
             "no_previous_run":        False,
             "previous_run_timestamp": prev_timestamp,
+            "previous_run_id":        prev_run_id,
+            "using_baseline":         using_baseline,
             "geo":                    geo,
             "newly_added":    sorted([_entry_new(curr_map[k]) for k in newly_added_keys],
                                      key=lambda x: (x["test_name"], x["device"])),

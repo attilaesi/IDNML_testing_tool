@@ -32,7 +32,8 @@ class TestResult:
 class BaseTest(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.name = _to_snake(self.__class__.__name__)
+        _raw = _to_snake(self.__class__.__name__)
+        self.name = _raw[:-5] if _raw.endswith('_test') else _raw
         self.description = self.__doc__ or "No description provided"
         self.category = self._get_category()
         self.locale: str = "UK"  # Set by framework_manager before each test runs

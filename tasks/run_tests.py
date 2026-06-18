@@ -57,6 +57,11 @@ async def main():
         action="store_true",
         help="Skip Google Sheets output at the end of the run.",
     )
+    parser.add_argument(
+        "--sync-tests",
+        action="store_true",
+        help="Upsert test metadata (description, conditions, outcomes) to Supabase tests table and exit.",
+    )
     args = parser.parse_args()
 
     cfg = TestConfig()
@@ -71,6 +76,11 @@ async def main():
     if args.no_headless:
         cfg.browser_config["headless"] = False
     CONFIG = cfg.get_config()
+
+    if args.sync_tests:
+        from core.tests_sync import sync_to_supabase
+        await sync_to_supabase(CONFIG)
+        return
 
     print_runner_banner(CONFIG, label="AD TEST RUN")
     if args.test:

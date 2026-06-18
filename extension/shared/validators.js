@@ -31,10 +31,17 @@ const VALIDATORS = {
       errors.push("No DISPLAY bidRequested events captured. Prebid may not have fired yet.");
       return errors;
     }
-    if (dbContext && dbContext.bidders && dbContext.bidders.length) {
+    if (dbContext && dbContext.displayBidders && dbContext.displayBidders.length) {
       const observed = new Set((data.biddersFromRequests || []).map(b => String(b).toLowerCase()));
-      const missing = dbContext.bidders.filter(b => !observed.has(String(b).toLowerCase()));
-      if (missing.length) errors.push("Expected bidders not observed: " + missing.join(", "));
+      const missing = dbContext.displayBidders.filter(b => !observed.has(String(b).toLowerCase()));
+      if (missing.length) {
+        const ctx = [dbContext.geo, dbContext.device].filter(Boolean).join(", ");
+        errors.push(
+          "Expected display bidders not observed: " + missing.join(", ") +
+          (ctx ? " — " + ctx : "") +
+          ". Expected: " + dbContext.displayBidders.join(", ") + "."
+        );
+      }
     }
     return errors;
   },
@@ -47,10 +54,17 @@ const VALIDATORS = {
         : null; // SKIP — no video on this page type
     }
     const errors = [];
-    if (dbContext && dbContext.bidders && dbContext.bidders.length) {
+    if (dbContext && dbContext.videoBidders && dbContext.videoBidders.length) {
       const observed = new Set((data.biddersFromHeroRequests || []).map(b => String(b).toLowerCase()));
-      const missing = dbContext.bidders.filter(b => !observed.has(String(b).toLowerCase()));
-      if (missing.length) errors.push("Expected video bidders not observed: " + missing.join(", "));
+      const missing = dbContext.videoBidders.filter(b => !observed.has(String(b).toLowerCase()));
+      if (missing.length) {
+        const ctx = [dbContext.geo, dbContext.device].filter(Boolean).join(", ");
+        errors.push(
+          "Expected video bidders not observed: " + missing.join(", ") +
+          (ctx ? " — " + ctx : "") +
+          ". Expected: " + dbContext.videoBidders.join(", ") + "."
+        );
+      }
     }
     return errors;
   },
@@ -271,6 +285,41 @@ const VALIDATORS = {
       lines.push(bidder + ": " + r.join("; "));
     }
     return lines.length ? ["Hero player placement failures:\n" + lines.join("\n")] : [];
+  },
+
+  "pbjs_msft_keywords": (data, allResults, dbContext) => {
+    if (!data || !data.hasPbjs) return null; // SKIP
+
+    // Skip if msft didn't bid on this page — checked against DB profile if available,
+    // otherwise fall back to what the JS observed in the bid events.
+    const _displayBidders = (dbContext && dbContext.displayBidders) || [];
+    if (_displayBidders.length) {
+      if (!_displayBidders.map(b => String(b).toLowerCase()).includes("msft")) return null;
+    } else if (!data.msft_bid_observed) {
+      return null; // SKIP — msft not seen in auction and no DB context to override
+    }
+
+    const userKw = data.user_keywords;
+    const siteKw = data.site_keywords;
+    const errors = [];
+
+    if (userKw === null) {
+      errors.push("ortb2.user.keywords not found.");
+    } else {
+      if (!data.user_has_p_standard) errors.push("user.keywords: 'p_standard=' key not present.");
+      if (!data.user_has_permutive)  errors.push("user.keywords: 'permutive=' key not present.");
+      if (data.user_spaces_found)    errors.push("user.keywords: spaces around comma separators.");
+    }
+
+    if (siteKw === null) {
+      errors.push("ortb2.site.keywords not found.");
+    } else {
+      if (!data.site_has_mantis)         errors.push("site.keywords: 'mantis=' key not present.");
+      if (!data.site_has_mantis_context) errors.push("site.keywords: 'mantis_context=' key not present.");
+      if (data.site_spaces_found)        errors.push("site.keywords: spaces around comma separators.");
+    }
+
+    return errors;
   },
 
   "pbjs_display_mantis_signals_bid": (data) => {

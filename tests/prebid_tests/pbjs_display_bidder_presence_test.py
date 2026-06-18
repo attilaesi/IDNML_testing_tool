@@ -237,9 +237,17 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         if missing or unexpected:
             result.state = TestState.FAILED
             if missing:
-                result.errors.append("Missing DISPLAY bidders: " + ", ".join(missing))
+                result.errors.append(
+                    f"Expected display bidders not observed: {', '.join(missing)} — "
+                    f"geo: {geo.upper()}, device: {device}. "
+                    f"Expected: {', '.join(sorted(expected))}."
+                )
             if unexpected:
-                result.errors.append("Unexpected DISPLAY bidders: " + ", ".join(unexpected))
+                result.errors.append(
+                    f"Unexpected display bidders seen: {', '.join(unexpected)} — "
+                    f"geo: {geo.upper()}, device: {device}. "
+                    f"Expected: {', '.join(sorted(expected))}."
+                )
         else:
             result.state = TestState.PASSED
 

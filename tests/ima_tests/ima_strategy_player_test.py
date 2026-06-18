@@ -1,21 +1,36 @@
 """
 ima:strategy_player
 
+What this test is meant to test
+--------------------------------
 Captures which JW Player strategy rules profile was selected for the
 hero player.  The player logs the decision to the console as:
   "Strategy Rules <profile name>"
 
-Known profiles:
-  Premium player
-  Commercial player
-  Sensitive player
-  Bulletin hero player
-  Default player with sound on
-  Default player with sound off
+Known profiles: Premium player, Commercial player, Sensitive player,
+Bulletin hero player, Default player with sound on, Default player
+with sound off.
 
-This test is informational — it records which player profile was active
-so it appears in trace output and the results sheet.  It SKIPs on
-non-video pages and when no strategy log was captured.
+This is an informational test — it records which player profile was
+active so the value appears in trace output and the results sheet,
+enabling regression detection if the profile selection changes unexpectedly.
+
+Test conditions
+---------------
+- Page must be identified as a video page (GPT pageType == "video_article"
+  or similar).
+- The JW Player must have initialised and emitted a strategy rules console
+  log before the test timeout.
+
+What counts as PASS / FAIL / SKIPPED
+--------------------------------------
+- PASSED:
+    - A JW Player strategy rules profile name was captured from the console log.
+- FAILED:
+    - No strategy rules log was found — player may not have initialised
+      or the console log format changed.
+- SKIPPED:
+    - Page is not a video page so no player is expected.
 """
 
 from core.base_test import VideoOnlyTest, TestResult, TestState

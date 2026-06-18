@@ -1014,8 +1014,9 @@ class SheetsWriter:
         except Exception:
             pass
 
+        label = "Baseline" if regression.get("using_baseline") else "Last run"
         r = row()
-        data.append([f"Compared against: {prev_ts}   geo: {geo}"])
+        data.append([f"Compared against: {label} — {prev_ts}   geo: {geo}"])
         fmt(r, 1, r, REG_COLS, CellFormat(
             backgroundColor=_c("header_md"),
             textFormat=TextFormat(foregroundColor=_c("white"), fontSize=10),

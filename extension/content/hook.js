@@ -1,6 +1,28 @@
 (function () {
   try {
     // ------------------------------------------------------------
+    // Auto-set is_mobile_or_tablet cookie from screen width.
+    // Runs at document_start so page ad scripts see the value on first read.
+    // Only sets if the cookie is not already present (preserves production value).
+    // ------------------------------------------------------------
+    var _expectedMobile = (window.innerWidth < 1024) ? "true" : "false";
+    var _currentMobile = null;
+    document.cookie.split(";").some(function (c) {
+      var t = c.trim();
+      if (t.indexOf("is_mobile_or_tablet=") === 0) {
+        _currentMobile = t.slice("is_mobile_or_tablet=".length).trim();
+        return true;
+      }
+    });
+    if (_currentMobile !== _expectedMobile) {
+      document.cookie = "is_mobile_or_tablet=" + _expectedMobile + "; path=/";
+    }
+  } catch (e) {}
+})();
+
+(function () {
+  try {
+    // ------------------------------------------------------------
     // JW Player strategy rules capture
     // Patches console.log before page scripts run so the strategy
     // decision ("Strategy Rules Premium player" etc.) is stored.

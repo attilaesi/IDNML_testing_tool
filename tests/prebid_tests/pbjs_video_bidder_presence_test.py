@@ -266,9 +266,17 @@ class PbjsVideoBidderPresenceTest(VideoOnlyTest):
         if missing or unexpected:
             result.state = TestState.FAILED
             if missing:
-                result.errors.append("Missing VIDEO bidders (hero_player): " + ", ".join(missing))
+                result.errors.append(
+                    f"Expected video bidders not observed: {', '.join(missing)} — "
+                    f"geo: {geo.upper()}, device: {device}. "
+                    f"Expected: {', '.join(sorted(expected))}."
+                )
             if unexpected:
-                result.errors.append("Unexpected VIDEO bidders (hero_player): " + ", ".join(unexpected))
+                result.errors.append(
+                    f"Unexpected video bidders seen: {', '.join(unexpected)} — "
+                    f"geo: {geo.upper()}, device: {device}. "
+                    f"Expected: {', '.join(sorted(expected))}."
+                )
         else:
             result.state = TestState.PASSED
 

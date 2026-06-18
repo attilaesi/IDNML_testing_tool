@@ -12,9 +12,11 @@
   } catch (e) {}
 
   // placement is always 1.
-  // plcmt: tv_hub pages = 1 (instream); video / liveblog pages = 2 (accompanying content).
+  // plcmt: tv_hub pages and /tv/ section hubs = 1 (instream); video articles = 2 (accompanying content).
+  // GPT returns pageType="video" for both TV hubs and video articles, so URL path distinguishes them.
   const expectedPlacement = 1;
-  const expectedPlcmt = (pageType === "tv_hub") ? 1 : 2;
+  const isTvHub = pageType === "tv_hub" || window.location.pathname.startsWith("/tv/");
+  const expectedPlcmt = isTvHub ? 1 : 2;
 
   const diag = {
     hasPbjs: !!w.pbjs,
