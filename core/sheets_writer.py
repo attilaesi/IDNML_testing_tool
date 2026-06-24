@@ -262,6 +262,8 @@ def _collect_test_docs() -> Dict[str, Dict[str, str]]:
             for node in _ast.walk(tree):
                 if isinstance(node, _ast.ClassDef):
                     snake = _to_snake(node.name)
+                    if snake.endswith('_test'):
+                        snake = snake[:-5]
                     if snake:
                         out[snake] = _split_docstring(module_doc)
                     break
