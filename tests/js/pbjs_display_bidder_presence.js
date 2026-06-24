@@ -4,7 +4,7 @@
     locale: null,
     pageType: null,
     liveblog: null,
-    source: "__pbjsBidEventsDisplay",
+    source: null,
     biddersFromRequests: [],
     eventsLen: 0,
     bidRequestedEvents: 0
@@ -32,8 +32,34 @@
     }
   } catch (e) {}
 
-  const events = Array.isArray(w.__pbjsBidEventsDisplay) ? w.__pbjsBidEventsDisplay : [];
-  out.eventsLen = events.length;
+  const isHeroCode = (code) => {
+    const s = String(code || '').trim().toLowerCase();
+    return s === 'hero_player' || s.endsWith('/hero_player');
+  };
+
+  // Primary: captured display event store
+  let store = Array.isArray(w.__pbjsBidEventsDisplay) ? w.__pbjsBidEventsDisplay : [];
+  let bidReq = store.filter(e => e && e.type === "bidRequested" && e.args);
+
+  // Fallback: pbjs.getEvents() — Prebid's own internal event log (timing-safe)
+  if (!bidReq.length && typeof w.pbjs.getEvents === "function") {
+    try {
+      const native = w.pbjs.getEvents() || [];
+      bidReq = native
+        .filter(e => {
+          if (!e || e.eventType !== "bidRequested" || !e.args) return false;
+          const bids = Array.isArray(e.args.bids) ? e.args.bids : [];
+          return !bids.some(b => isHeroCode((b || {}).adUnitCode));
+        })
+        .map(e => ({ type: "bidRequested", args: e.args, stream: "display", ts: 0 }));
+      if (bidReq.length) out.source = "pbjs.getEvents";
+    } catch (e) {}
+  } else if (bidReq.length) {
+    out.source = "__pbjsBidEventsDisplay";
+  }
+
+  out.eventsLen = bidReq.length;
+  out.bidRequestedEvents = bidReq.length;
 
   const reqSet = new Set();
   const addBidder = (code) => {
@@ -44,9 +70,6 @@
   };
 
   try {
-    const bidReq = events.filter(e => e && e.type === "bidRequested" && e.args);
-    out.bidRequestedEvents = bidReq.length;
-
     bidReq.forEach(ev => {
       const req = ev.args || {};
       if (req.bidderCode) addBidder(req.bidderCode);

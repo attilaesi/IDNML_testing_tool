@@ -14,15 +14,16 @@ Test conditions
 - If pageType is article-like (article, video, image) we expect
   category1 to be set.
 
-What counts as PASS / FAIL / SKIPPED
-------------------------------------
+What counts as PASS / FAIL / SKIPPED / N/A
+------------------------------------------
 - PASSED:
-    - category1 has at least one non-empty value on article-like pages, or
-    - pageType clearly non-article (index/homepage) -> SKIPPED.
+    - category1 has at least one non-empty value on article-like pages.
 - FAILED:
     - For article-like pages, category1 is missing or only empty strings.
 - SKIPPED:
     - GPT targeting not available.
+- N/A:
+    - pageType is index or homepage — category1 is not expected on non-article pages.
 """
 
 from pathlib import Path
@@ -49,11 +50,11 @@ class GptCategory1Test(GptBaseTest):
         page_type_vals: List[str] = data.get("pageType", [])
         page_type = (page_type_vals[0].lower() if page_type_vals else "").strip()
 
-        # Non-article pageTypes: skip
+        # Non-article pageTypes: not applicable
         if page_type in {"index", "homepage"}:
-            result.state = TestState.SKIPPED
+            result.state = TestState.NOT_APPLICABLE
             result.warnings.append(
-                f"pageType '{page_type}' treated as non-article; skipping GptCategory1Test."
+                f"pageType '{page_type}' — category1 not expected on non-article pages."
             )
             return result
 

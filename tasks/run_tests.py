@@ -37,6 +37,11 @@ async def main():
         help="Upload results to Supabase and include regression diff in the sheet.",
     )
     parser.add_argument(
+        "--dbupload",
+        action="store_true",
+        help="Upload results to Supabase without running a regression comparison.",
+    )
+    parser.add_argument(
         "--browserstack",
         action="store_true",
         help="Run via BrowserStack Automate instead of local Playwright.",
@@ -102,9 +107,9 @@ async def main():
 
     print_results(results, framework, CONFIG, _elapsed)
 
-    # Supabase upload + regression diff (--regression only)
+    # Supabase upload (--dbupload or --regression) + regression diff (--regression only)
     regression = None
-    if args.regression and results:
+    if (args.regression or args.dbupload) and results:
         from core.supabase_writer import (
             SupabaseResultsWriter, new_run_id,
             geo_from_results, publisher_from_results, environment_from_results,
@@ -117,8 +122,9 @@ async def main():
         print("\n📤 Uploading results to Supabase…")
         sw = SupabaseResultsWriter(CONFIG)
         await sw.write_results(results, run_id, ts_iso)
-        print("📊 Fetching regression diff…")
-        regression = await sw.fetch_regression_diff(run_id, publisher, environment, geo)
+        if args.regression:
+            print("📊 Fetching regression diff…")
+            regression = await sw.fetch_regression_diff(run_id, publisher, environment, geo)
 
     # Google Sheets output (single-device run — one device tab + Summary)
     if bool(CONFIG.get("sheets_enabled", False)) and results and not args.nosheet:

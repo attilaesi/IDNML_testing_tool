@@ -13,15 +13,19 @@ Test conditions
 - The IMA VAST ad request must have fired and been captured from
   securepubads.g.doubleclick.net before the test timeout.
 
-What counts as PASS / FAIL / SKIPPED
---------------------------------------
+What counts as PASS / FAIL / ERROR / N/A
+------------------------------------------
 - PASSED:
     - "ABS" key present in IMA cust_params with a non-empty value.
 - FAILED:
     - "ABS" key missing from cust_params.
     - "ABS" key present but empty.
-- SKIPPED:
-    - No IMA ad request captured — video player did not fire on this page.
+- N/A:
+    - Page is not a video page, or geo is US (handled by VideoOnlyTest base class).
+- ERROR:
+    - JW Player did not appear in DOM (player load failure).
+    - JW Player loaded and play triggered but no IMA VAST request captured.
+    - Player setup did not complete (see framework logs).
 """
 
 from core.ima_base_test import ImaBaseTest
@@ -41,8 +45,8 @@ class ImaAbsTest(ImaBaseTest):
 
     async def validate(self, result: TestResult) -> TestResult:
         if result.data.get("cust_params") is None:
-            result.state = TestState.SKIPPED
-            result.warnings.append("No IMA ad request captured — video player may not have fired.")
+            result.state = TestState.ERROR
+            result.errors.append(self._ima_chain_error)
             return result
 
         vals = result.data.get("ABS", [])

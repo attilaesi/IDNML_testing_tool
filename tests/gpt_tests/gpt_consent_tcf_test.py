@@ -18,10 +18,9 @@ We look for:
   1) A "gdpr" targeting key on GPT, and/or
   2) An "euconsent-v2" cookie (TCString)
 
-What counts as PASS / FAIL / SKIPPED
-------------------------------------
+What counts as PASS / FAIL / SKIPPED / N/A
+------------------------------------------
 - PASSED:
-    - Locale != "UK": test is SKIPPED, not a failure, OR
     - Locale == "UK" and we find either:
         * a "gdpr" targeting value, or
         * a non-empty euconsent-v2 TCString.
@@ -30,8 +29,10 @@ What counts as PASS / FAIL / SKIPPED
     - Locale == "UK" and we cannot find *either* gdpr targeting or a TCString.
 
 - SKIPPED:
-    - Locale != "UK" (e.g. US),
-    - OR GPT targeting is not available at all.
+    - GPT targeting is not available at all.
+
+- N/A:
+    - Locale != "UK" (e.g. US) — TCF consent is not enforced outside UK.
 """
 
 from pathlib import Path
@@ -86,11 +87,11 @@ class GptConsentTcfTest(BaseTest):
             )
             return result
 
-        # Non-EU traffic: skip (Locale != UK)
+        # Non-EU traffic: not applicable (Locale != UK)
         if locale != "UK":
-            result.state = TestState.SKIPPED
+            result.state = TestState.NOT_APPLICABLE
             result.warnings.append(
-                f"Locale={locale}; skipping TCF consent test (only enforced for UK)."
+                f"Locale={locale} — TCF consent not enforced outside UK."
             )
             return result
 

@@ -1,6 +1,6 @@
 () => {
     const out = {
-        source: null,  // "__pbjsBidEvents" | "pbjs.getBidResponsesForAdUnitCode"
+        source: null,  // "__pbjsBidEventsDisplay" | "pbjs.getEvents" | "pbjs.getBidResponsesForAdUnitCode"
         adUnits_with_responses: [],
         total_bid_responses: 0,
         winning_bids: [],
@@ -22,9 +22,20 @@
     }
 
     try {
-        const events = Array.isArray(w.__pbjsBidEvents)
-          ? w.__pbjsBidEvents
-          : [];
+        // Primary: captured display event store
+        let events = Array.isArray(w.__pbjsBidEventsDisplay) ? w.__pbjsBidEventsDisplay : [];
+        let evSource = "__pbjsBidEventsDisplay";
+
+        // Fallback: pbjs.getEvents() — Prebid's own internal event log (timing-safe)
+        if (!events.length && typeof pbjs.getEvents === "function") {
+          try {
+            const native = pbjs.getEvents() || [];
+            events = native
+              .filter(e => e && e.args)
+              .map(e => ({ type: e.eventType, stream: "display", args: e.args, ts: 0 }));
+            if (events.length) evSource = "pbjs.getEvents";
+          } catch (e) {}
+        }
 
         out.debug.eventsLen = events.length;
         out.debug.eventTypes = Array.from(
@@ -41,15 +52,14 @@
         out.debug.bidRequestedCount = bidRequestedEvents.length;
         out.debug.bidResponseCount = bidRespEvents.length;
 
-        // ---- primary: bidResponse events ----
         if (bidRespEvents.length) {
-            out.source = "__pbjsBidEvents";
+            out.source = evSource;
 
             const perAdUnit = new Map();
 
             bidRespEvents.forEach(ev => {
                 const b = ev.args || {};
-                const code = b.adUnitCode || b.adUnitCode;
+                const code = b.adUnitCode;
                 if (!code) return;
 
                 let entry = perAdUnit.get(code);
@@ -79,7 +89,7 @@
             out.total_bid_responses = total;
         }
     } catch (e) {
-        out.errors.push("error reading __pbjsBidEvents: " + String(e));
+        out.errors.push("error reading display event store: " + String(e));
     }
 
     // ---------------------------------------------

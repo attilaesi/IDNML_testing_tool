@@ -19,6 +19,7 @@ from core.url_context_helpers import (
 )
 from core.ansi import colour_cell, colour_state, dim
 from core.log_helpers import log_line, log_arrow_indent
+from core.supabase_helpers import is_supabase_configured, get_supabase_credentials
 
 from config.site_test_plans import SITE_TEST_PLANS
 
@@ -802,6 +803,7 @@ class TestFramework:
                     await page.evaluate("() => { window.__imaVideoSetupDone = true; }")
                 else:
                     _vtrace(f"no inline JW Player appeared after {_player_timeout:.0f}s — giving up")
+                    await page.evaluate("() => { window.__imaPlayerAbsent = true; }")
             except Exception as e:
                 _vtrace(f"video setup error: {e}")
 
@@ -945,6 +947,19 @@ class TestFramework:
 
     # ------------- Main runner -------------
 
+    async def _check_supabase_connection(self) -> bool:
+        """Quick HEAD-style check against the Supabase REST API; returns True if reachable."""
+        import aiohttp
+        url, key = get_supabase_credentials(self.config)
+        ping_url = url.rstrip("/") + "/rest/v1/test_run_results?limit=1"
+        headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(ping_url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    return resp.status < 500
+        except Exception:
+            return False
+
     async def run_tests(
         self,
         test_names: Optional[List[str]] = None,
@@ -973,6 +988,14 @@ class TestFramework:
         if not test_classes:
             print(log_line("TESTS", message="No tests found to run"))
             return results
+
+        # Supabase preflight — abort early if configured but unreachable
+        if is_supabase_configured(self.config):
+            if not await self._check_supabase_connection():
+                print(log_line("SETUP", message="❌ Supabase connection failed — aborting test run."))
+                print(log_line("SETUP", message="   Check your Supabase URL/key in base_config.py or environment variables."))
+                return results
+            print(log_line("SETUP", message="Supabase: connected ✓"))
 
         # Start browser / context
         await self.browser_manager.start()

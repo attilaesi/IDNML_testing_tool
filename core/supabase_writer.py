@@ -67,10 +67,11 @@ def _aggregate(results: List[TestResult], run_id: str, timestamp: str) -> List[D
         geo = (ctx.get("geo") or (r.metadata or {}).get("locale") or "unknown").upper()
         publisher = ctx.get("publisher") or "unknown"
         env = ctx.get("env") or "unknown"
-        buckets[(r.test_name, device, geo, publisher, env)].append(r)
+        page_type = ctx.get("db_page_type") or (r.metadata or {}).get("page_type") or "unknown"
+        buckets[(r.test_name, device, geo, publisher, env, page_type)].append(r)
 
     rows = []
-    for (test_name, device, geo, publisher, env), group in buckets.items():
+    for (test_name, device, geo, publisher, env, page_type), group in buckets.items():
         states = [r.state for r in group]
         if TestState.ERROR in states:
             status = "ERROR"
@@ -78,8 +79,10 @@ def _aggregate(results: List[TestResult], run_id: str, timestamp: str) -> List[D
             status = "FAIL"
         elif TestState.PASSED in states:
             status = "PASS"
-        else:
+        elif TestState.SKIPPED in states:
             status = "SKIP"
+        else:
+            status = "N/A"
 
         error_summary = None
         error_details = []
@@ -89,6 +92,12 @@ def _aggregate(results: List[TestResult], run_id: str, timestamp: str) -> List[D
                     error_summary = str(r.errors[0]).strip().splitlines()[0][:500]
                 error_details.extend([str(e).strip() for e in r.errors])
 
+        if error_summary is None:
+            for r in group:
+                if r.state in {TestState.SKIPPED, TestState.NOT_APPLICABLE} and r.warnings:
+                    error_summary = str(r.warnings[0]).strip().splitlines()[0][:500]
+                    break
+
         rows.append({
             "run_id":        run_id,
             "timestamp":     timestamp,
@@ -96,6 +105,7 @@ def _aggregate(results: List[TestResult], run_id: str, timestamp: str) -> List[D
             "device":        device,
             "publisher":     publisher,
             "environment":   env,
+            "page_type":     page_type,
             "test_name":     test_name,
             "status":        status,
             "error_summary": error_summary,

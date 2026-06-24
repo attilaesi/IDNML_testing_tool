@@ -14,12 +14,14 @@ Test conditions
 - Supabase must be configured (otherwise skipped).
 - At least one DISPLAY bidRequested event must have been captured.
 
-What counts as PASS / FAIL / SKIP
------------------------------------
+What counts as PASS / FAIL / ERROR / SKIP
+------------------------------------------
 - PASSED:  every banner ad unit has a floor configured, and all values match the DB.
 - FAILED:  one or more units have no floor configured in Prebid.
 - FAILED:  one or more units have a floor that differs from the DB value.
-- SKIPPED: window.pbjs missing, Supabase not configured, or no display activity observed.
+- ERROR:   window.pbjs not found on page — Prebid did not load.
+- ERROR:   Prebid loaded but no DISPLAY bid requests captured — auction did not fire.
+- SKIPPED: Supabase not configured.
 """
 
 from pathlib import Path
@@ -123,13 +125,16 @@ class PbjsDisplayFloorsPricesTest(BaseTest):
         diag: Dict[str, Any] = result.data or {}
 
         if not diag.get("hasPbjs"):
-            result.state = TestState.SKIPPED
-            result.warnings.append("window.pbjs not present.")
+            result.state = TestState.ERROR
+            result.errors.append("window.pbjs not found on page — Prebid did not load.")
             return result
 
         if not diag.get("has_display_store") or not diag.get("display_bidrequested_events"):
-            result.state = TestState.SKIPPED
-            result.warnings.append("No DISPLAY bidRequested events observed — skipping floor check.")
+            result.state = TestState.ERROR
+            result.errors.append(
+                "Prebid loaded but no DISPLAY bid requests were observed — "
+                "cannot check floor prices (check pbjs_display_auction_activity for root cause)."
+            )
             return result
 
         if not is_supabase_configured(self.config):

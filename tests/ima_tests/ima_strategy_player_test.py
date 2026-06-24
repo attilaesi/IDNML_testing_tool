@@ -22,16 +22,18 @@ Test conditions
 - The JW Player must have initialised and emitted a strategy rules console
   log before the test timeout.
 
-What counts as PASS / FAIL / SKIPPED
---------------------------------------
+What counts as PASS / FAIL / N/A
+---------------------------------
 - PASSED:
     - A JW Player strategy rules profile name was captured from the console log.
 - FAILED:
     - No strategy rules log was found — player may not have initialised
       or the console log format changed.
-- SKIPPED:
-    - Page is not a video page so no player is expected.
+- N/A:
+    - Page is not a video page, or geo is US — no player expected.
 """
+
+QUARANTINE = True  # redundant — kept for reference
 
 from core.base_test import VideoOnlyTest, TestResult, TestState
 

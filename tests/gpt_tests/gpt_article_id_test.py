@@ -16,8 +16,8 @@ Test conditions
   an article-like page (e.g. "article", "video", "image"), we expect
   an article ID key to be present.
 
-What counts as PASS / FAIL / SKIPPED
-------------------------------------
+What counts as PASS / FAIL / SKIPPED / N/A
+------------------------------------------
 - PASSED:
     - For article-like pageTypes, at least one article ID key is present
       with a non-empty value.
@@ -25,8 +25,9 @@ What counts as PASS / FAIL / SKIPPED
     - For article-like pageTypes, all candidate article ID keys are
       missing or hold only empty / obviously invalid values.
 - SKIPPED:
-    - googletag.pubads() targeting cannot be read, or
-    - pageType is clearly non-article (e.g. "index", "homepage").
+    - googletag.pubads() targeting cannot be read.
+- N/A:
+    - pageType is index or homepage — article ID is not expected on non-article pages.
 """
 
 from pathlib import Path
@@ -61,10 +62,10 @@ class GptArticleIdTest(GptBaseTest):
         page_type_vals = data.get("pageType") or data.get("pagetype") or []
         page_type = (page_type_vals[0].lower() if page_type_vals else "").strip()
 
-        # Treat "index" / "homepage" as non-article; skip in that case
+        # Treat "index" / "homepage" as non-article; not applicable
         if page_type in {"index", "homepage"}:
-            result.state = TestState.SKIPPED
-            result.warnings.append(f"pageType '{page_type}' treated as non-article; skipping GptArticleIdTest.")
+            result.state = TestState.NOT_APPLICABLE
+            result.warnings.append(f"pageType '{page_type}' — article ID not expected on non-article pages.")
             return result
 
         # For all other pageTypes (including missing), we expect an article ID

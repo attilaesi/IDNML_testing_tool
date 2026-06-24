@@ -98,10 +98,9 @@ class ReadinessWaiter:
 
             const hasHeroBidRequestedInPbjsBidEvents = () => {{
               try {{
-                // Prefer the dedicated video store if present, fall back to legacy combined store.
                 const store = Array.isArray(w.__pbjsBidEventsVideo)
                   ? w.__pbjsBidEventsVideo
-                  : (Array.isArray(w.__pbjsBidEvents) ? w.__pbjsBidEvents : []);
+                  : [];
                 if (!store.length) return false;
 
                 for (const ev of store) {{

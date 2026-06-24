@@ -68,7 +68,7 @@ def _parse_outcome_block(text: str, marker: str) -> Optional[str]:
         return None
 
     our = marker.lower()
-    all_markers = {"passed", "failed", "skipped", "pass", "fail", "skip"}
+    all_markers = {"passed", "failed", "skipped", "pass", "fail", "skip", "n/a", "not_applicable", "not applicable"}
 
     collecting = False
     result: list[str] = []
@@ -114,6 +114,7 @@ def parse_docstring(doc: str) -> dict:
         "pass_when":   _parse_outcome_block(outcomes, "PASSED"),
         "fail_when":   _parse_outcome_block(outcomes, "FAILED"),
         "skip_when":   _parse_outcome_block(outcomes, "SKIPPED"),
+        "na_when":     _parse_outcome_block(outcomes, "N/A"),
     }
 
 

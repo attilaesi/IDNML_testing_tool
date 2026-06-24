@@ -16,10 +16,9 @@ Test conditions
 We inspect:
   - googletag.pubads().getTargeting("gdpr")
 
-What counts as PASS / FAIL / SKIPPED
-------------------------------------
+What counts as PASS / FAIL / SKIPPED / N/A
+------------------------------------------
 - PASSED:
-    - Locale != "UK" and no gdpr key found (test skipped), OR
     - Locale == "UK" and at least one gdpr value is "0" or "1".
 
 - FAILED:
@@ -28,8 +27,10 @@ What counts as PASS / FAIL / SKIPPED
         * all values are something other than "0" or "1".
 
 - SKIPPED:
-    - Locale != "UK", OR
     - GPT targeting is not available at all.
+
+- N/A:
+    - Locale != "UK" — GDPR targeting is not enforced outside UK.
 """
 
 from pathlib import Path
@@ -80,11 +81,11 @@ class GptGdprKeyTest(BaseTest):
             )
             return result
 
-        # Non-EU/UK: skip
+        # Non-EU/UK: not applicable
         if locale != "UK":
-            result.state = TestState.SKIPPED
+            result.state = TestState.NOT_APPLICABLE
             result.warnings.append(
-                f"Locale={locale}; skipping GptGdprKeyTest (only enforced for UK)."
+                f"Locale={locale} — GDPR targeting not enforced outside UK."
             )
             return result
 

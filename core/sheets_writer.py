@@ -133,6 +133,44 @@ def _agg_ck(cell: str) -> str:
     return "dash"
 
 
+# ── Page-type helpers ─────────────────────────────────────────────────────────
+
+_PAGETYPE_ORDER = [
+    "image_article", "article", "image",
+    "video_article", "video",
+    "index",
+    "blog_article", "liveblog",
+    "unknown",
+]
+
+_PAGETYPE_LABEL: Dict[str, str] = {
+    "image_article": "Article",
+    "article":       "Article",
+    "image":         "Article",
+    "video_article": "Video",
+    "video":         "Video",
+    "index":         "Index",
+    "blog_article":  "Liveblog",
+    "liveblog":      "Liveblog",
+    "blog/video":    "Liveblog",
+    "blog/image":    "Liveblog",
+    "unknown":       "Unknown",
+}
+
+
+def _pagetype_from_result(r: TestResult) -> str:
+    meta = getattr(r, "metadata", None) or {}
+    if not isinstance(meta, dict):
+        return "unknown"
+    ctx = meta.get("context_summary") or {}
+    return ctx.get("db_page_type") or meta.get("page_type") or "unknown"
+
+
+def _collect_pagetypes(results: List[TestResult]) -> List[str]:
+    seen = {_pagetype_from_result(r) for r in results}
+    return sorted(seen, key=lambda p: _PAGETYPE_ORDER.index(p) if p in _PAGETYPE_ORDER else 99)
+
+
 # ── Component ordering ────────────────────────────────────────────────────────
 
 _COMPONENT_ORDER = ["env", "gpt", "ima", "pbjs", "layout", "taboola"]
@@ -573,16 +611,15 @@ class SheetsWriter:
                 return f'=HYPERLINK("#gid={appendix_gid}&range=A{arow}","{test_name}")'
             return test_name
 
-        urls = _stable_urls(results)
-        page_types = _url_page_types(results)
+        pagetypes = _collect_pagetypes(results)
         test_names = _sort_by_component({r.test_name for r in results if r.test_name})
         result_map: Dict[Tuple[str, str], TestResult] = {}
         for r in results:
-            if r.url:
-                result_map[(r.test_name, r.url)] = r
+            pt = _pagetype_from_result(r)
+            result_map[(r.test_name, pt)] = r
 
-        n_url_cols = len(urls)
-        total_cols = 1 + n_url_cols + 1  # Test | U1..Un | Overall
+        n_pt_cols = len(pagetypes)
+        total_cols = 1 + n_pt_cols + 1  # Test | pt_cols | Overall
 
         playwright_name = run_meta.get("device_names", {}).get(device_key, "")
         device_display = device_key.replace("_", " ").upper()
@@ -616,9 +653,9 @@ class SheetsWriter:
         ))
 
         # ── Row 5: column headers ─────────────────────────────────────────────
-        u_labels = [f"U{i} ({page_types.get(u, '?')})" for i, u in enumerate(urls, start=1)]
+        pt_labels = [_PAGETYPE_LABEL.get(pt, pt) for pt in pagetypes]
         r = row()
-        data.append(["Test"] + u_labels + ["Overall"])
+        data.append(["Test"] + pt_labels + ["Overall"])
         fmt(r, 1, r, total_cols, CellFormat(
             backgroundColor=_c("header_dk"),
             textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
@@ -648,8 +685,8 @@ class SheetsWriter:
             row_data: List = [_test_name_cell(test_name)]
             row_states: List[Optional[TestState]] = []
 
-            for u in urls:
-                res = result_map.get((test_name, u))
+            for pt in pagetypes:
+                res = result_map.get((test_name, pt))
                 if res is None:
                     row_states.append(None)
                     row_data.append("-")
@@ -684,7 +721,7 @@ class SheetsWriter:
                     ))
 
             # Colour + bold overall cell
-            ov_col = 1 + n_url_cols + 1
+            ov_col = 1 + n_pt_cols + 1
             fmt(r, ov_col, r, ov_col, CellFormat(
                 backgroundColor=_c(_agg_ck(overall)),
                 textFormat=TextFormat(bold=True),
@@ -695,7 +732,6 @@ class SheetsWriter:
 
         # ── Failure details section ───────────────────────────────────────────
         failing = [r_ for r_ in results if r_.state in (TestState.FAILED, TestState.ERROR)]
-        url_label = {u: f"U{i}" for i, u in enumerate(urls, start=1)}
 
         data.append([])
         data.append([])
@@ -705,26 +741,27 @@ class SheetsWriter:
         fmt(r, 1, r, 4, CellFormat(textFormat=TextFormat(bold=True, fontSize=11)))
 
         r = row()
-        data.append(["Test", "URL#", "State", "Detail"])
+        data.append(["Test", "Page Type", "State", "Detail"])
         fmt(r, 1, r, 4, CellFormat(
             backgroundColor=_c("header_dk"),
             textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
         ))
 
-        by_url: Dict[str, List[TestResult]] = defaultdict(list)
+        by_pt: Dict[str, List[TestResult]] = defaultdict(list)
         for r_ in failing:
-            by_url[r_.url].append(r_)
+            by_pt[_pagetype_from_result(r_)].append(r_)
 
         if failing:
-            for u in urls:
-                group = sorted(by_url.get(u, []), key=lambda x: _component_sort_key(x.test_name or ""))
+            for pt in pagetypes:
+                group = sorted(by_pt.get(pt, []), key=lambda x: _component_sort_key(x.test_name or ""))
                 for r_ in group:
                     msgs = r_.errors if r_.errors else (r_.warnings or [])
                     state_str = "ERROR" if r_.state == TestState.ERROR else "FAIL"
                     state_ck = "error" if state_str == "ERROR" else "fail"
+                    pt_label = _PAGETYPE_LABEL.get(pt, pt)
                     if not msgs:
                         cur = row()
-                        data.append([r_.test_name, url_label.get(u, u), state_str, ""])
+                        data.append([r_.test_name, pt_label, state_str, ""])
                         fmt(cur, 3, cur, 3, CellFormat(backgroundColor=_c(state_ck)))
                     else:
                         first = True
@@ -732,31 +769,13 @@ class SheetsWriter:
                             for line in (str(msg).splitlines() or [""]):
                                 cur = row()
                                 if first:
-                                    data.append([r_.test_name, url_label.get(u, u), state_str, line])
+                                    data.append([r_.test_name, pt_label, state_str, line])
                                     fmt(cur, 3, cur, 3, CellFormat(backgroundColor=_c(state_ck)))
                                     first = False
                                 else:
                                     data.append(["", "", "", line])
         else:
             data.append(["No failures — all tests passed."])
-
-        # ── URL key section ───────────────────────────────────────────────────
-        data.append([])
-        data.append([])
-
-        r = row()
-        data.append(["URL KEY"])
-        fmt(r, 1, r, 3, CellFormat(textFormat=TextFormat(bold=True, fontSize=11)))
-
-        r = row()
-        data.append(["U#", "Page Type", "URL"])
-        fmt(r, 1, r, 3, CellFormat(
-            backgroundColor=_c("header_dk"),
-            textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
-        ))
-
-        for i, u in enumerate(urls, start=1):
-            data.append([f"U{i}", page_types.get(u, "unknown"), u])
 
         fmt(1, 1, row() - 1, total_cols, CellFormat(verticalAlignment="TOP"))
 
@@ -767,9 +786,9 @@ class SheetsWriter:
         set_frozen(ws, rows=MATRIX_HEADER_ROW, cols=1)
 
         col_widths = {0: 220}
-        for i in range(n_url_cols):
+        for i in range(n_pt_cols):
             col_widths[1 + i] = 100
-        col_widths[1 + n_url_cols] = 130
+        col_widths[1 + n_pt_cols] = 130
         self._set_column_widths(ws, col_widths)
 
         return test_name_to_row
@@ -843,39 +862,51 @@ class SheetsWriter:
 
         data.append([])  # blank
 
-        # ── Device pass-rate summary ──────────────────────────────────────────
+        # ── Pass rate: page type × device ─────────────────────────────────────
         r = row()
-        data.append(["DEVICE PASS RATES"])
-        fmt(r, 1, r, 6, CellFormat(textFormat=TextFormat(bold=True, fontSize=11)))
+        data.append(["PASS RATE BY PAGE TYPE"])
+        fmt(r, 1, r, 1 + n_dev, CellFormat(textFormat=TextFormat(bold=True, fontSize=11)))
 
-        profile_col_label = "BrowserStack Profile" if runner == "BrowserStack" else "Playwright Profile"
         r = row()
-        data.append(["Device", profile_col_label, "Tests", "PASS", "FAIL", "SKIP"])
-        fmt(r, 1, r, 6, CellFormat(
+        data.append(["Page Type"] + [dk.replace("_", " ").title() for dk in device_keys])
+        fmt(r, 1, r, 1 + n_dev, CellFormat(
             backgroundColor=_c("header_dk"),
             textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
+            horizontalAlignment="CENTER",
         ))
+        PT_HEADER_ROW = r
 
-        device_names = run_meta.get("device_names", {})
-        for dk in device_keys:
-            dev_res = [x for x in all_results if getattr(x, "device", "") == dk]
-            t_names = sorted({x.test_name for x in dev_res if x.test_name})
-            n_pass = sum(1 for t in t_names if all(
-                x.state == TestState.PASSED for x in dev_res if x.test_name == t
-            ))
-            n_fail = sum(1 for t in t_names if any(
-                x.state in (TestState.FAILED, TestState.ERROR)
-                for x in dev_res if x.test_name == t
-            ))
-            n_skip = sum(1 for t in t_names if all(
-                x.state == TestState.SKIPPED for x in dev_res if x.test_name == t
-            ))
+        # Collect (pagetype, device) → states
+        pt_dev_buckets: Dict[Tuple[str, str], List[TestState]] = defaultdict(list)
+        for x in all_results:
+            pt = _pagetype_from_result(x)
+            dev = getattr(x, "device", "")
+            if pt and dev:
+                pt_dev_buckets[(pt, dev)].append(x.state)
+
+        all_pagetypes = _collect_pagetypes(all_results)
+
+        for pt in all_pagetypes:
             r = row()
-            data.append([dk, device_names.get(dk, ""), len(t_names), n_pass, n_fail, n_skip])
-            if n_fail:
-                fmt(r, 5, r, 5, CellFormat(backgroundColor=_c("fail")))
-            if n_pass:
-                fmt(r, 4, r, 4, CellFormat(backgroundColor=_c("pass")))
+            row_data: List = [_PAGETYPE_LABEL.get(pt, pt)]
+            for ci, dk in enumerate(device_keys):
+                states = pt_dev_buckets.get((pt, dk), [])
+                n_total = len(states)
+                n_pass_s = sum(1 for s in states if s == TestState.PASSED)
+                n_fail_s = sum(1 for s in states if s in (TestState.FAILED, TestState.ERROR))
+                n_skip_s = sum(1 for s in states if s == TestState.SKIPPED)
+                col = 2 + ci
+                if n_total == 0:
+                    row_data.append("—")
+                    fmt(r, col, r, col, CellFormat(backgroundColor=_c("dash"), horizontalAlignment="CENTER"))
+                else:
+                    checked = n_pass_s + n_fail_s
+                    pct = round(n_pass_s * 100 / checked) if checked else 0
+                    cell = f"{pct}%  ({n_pass_s}P · {n_fail_s}F · {n_skip_s}S)"
+                    row_data.append(cell)
+                    ck = "pass" if pct >= 90 else ("mixed" if pct >= 60 else "fail")
+                    fmt(r, col, r, col, CellFormat(backgroundColor=_c(ck), horizontalAlignment="CENTER"))
+            data.append(row_data)
 
         data.append([])
         data.append([])
@@ -946,10 +977,9 @@ class SheetsWriter:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=MATRIX_HEADER_ROW, cols=1)
 
-        # Col 0: test name, col 1: playwright profile, cols 2-5: counts, rest: device cols
-        col_widths = {0: 220, 1: 170, 2: 70, 3: 70, 4: 70, 5: 70}
+        col_widths = {0: 160}
         for i in range(n_dev):
-            col_widths.setdefault(1 + i, 130)
+            col_widths[1 + i] = 150
         self._set_column_widths(ws, col_widths)
 
     # ── Regression tab ────────────────────────────────────────────────────────

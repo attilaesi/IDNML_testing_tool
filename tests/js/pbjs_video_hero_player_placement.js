@@ -39,16 +39,10 @@
 
   if (!diag.hasPbjs) return diag;
 
-  const eventsVideo  = Array.isArray(w.__pbjsBidEventsVideo) ? w.__pbjsBidEventsVideo : null;
-  const eventsLegacy = Array.isArray(w.__pbjsBidEvents)      ? w.__pbjsBidEvents      : null;
+  const eventsVideo = Array.isArray(w.__pbjsBidEventsVideo) ? w.__pbjsBidEventsVideo : [];
 
-  const events =
-    (eventsVideo && eventsVideo.length ? eventsVideo : null) ||
-    (eventsLegacy && eventsLegacy.length ? eventsLegacy : []);
-
-  diag.source =
-    events === eventsVideo  ? "__pbjsBidEventsVideo" :
-    events === eventsLegacy ? "__pbjsBidEvents"      : "none";
+  const events = eventsVideo;
+  diag.source = events.length ? "__pbjsBidEventsVideo" : "none";
 
   diag.eventsLen = events.length;
   if (!events.length) return diag;

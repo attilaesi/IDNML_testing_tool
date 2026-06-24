@@ -178,20 +178,26 @@ class TestConfig:
         site_key = str(self.active_site).lower()
         site_profile = SITE_PROFILES[site_key]
 
+        def _extract_urls(raw):
+            """Accept {pagetype: url} dict or plain list; return (url_list, url->pagetype map)."""
+            if isinstance(raw, dict):
+                url_map = {k: v for k, v in raw.items() if v}
+                return list(url_map.values()), {v: k for k, v in url_map.items()}
+            return list(raw), {}
+
         if self.indy_feat_branch:
             # Swap the UAT Independent domain for the feature branch base URL.
             live_base = SITE_PROFILES["independent_uat"]["site_url"].rstrip("/")
             feat_base = self.indy_feat_branch.rstrip("/")
-            all_urls = [
-                u.replace(live_base, feat_base)
-                for u in SITE_PROFILES["independent_uat"]["urls"]
-            ]
+            uat_urls, uat_pt = _extract_urls(SITE_PROFILES["independent_uat"]["urls"])
+            all_urls = [u.replace(live_base, feat_base) for u in uat_urls]
+            config["url_pagetypes"] = {u.replace(live_base, feat_base): pt for u, pt in uat_pt.items()}
             config["active_site"] = "independent_feat"
             config["site_url"] = feat_base
         else:
             config["active_site"] = site_key
             config["site_url"] = site_profile["site_url"]
-            all_urls = site_profile["urls"]
+            all_urls, config["url_pagetypes"] = _extract_urls(site_profile["urls"])
 
         # Single URL set per site and trim to max_pages
         max_pages = config.get("max_pages", 10)

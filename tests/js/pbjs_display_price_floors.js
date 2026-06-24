@@ -24,22 +24,36 @@
     if (m && m[1]) out.locale = decodeURIComponent(m[1]).toUpperCase();
   } catch (e) {}
 
-  // ── Display activity ─────────────────────────────────────────────────────────
-  try {
-    const store = Array.isArray(window.__pbjsBidEventsDisplay)
-      ? window.__pbjsBidEventsDisplay : null;
-    if (store) {
-      out.has_display_store = true;
-      for (let i = 0; i < store.length; i++) {
-        if ((store[i] || {}).type === 'bidRequested') out.display_bidrequested_events += 1;
-      }
-    }
-  } catch (e) {}
-
   // ── pbjs ──────────────────────────────────────────────────────────────────────
   const pbjs = window.pbjs;
   if (!pbjs) { out.errors.push('window.pbjs not defined'); return out; }
   out.hasPbjs = true;
+
+  // ── Display activity ─────────────────────────────────────────────────────────
+  const isHeroCode = (code) => {
+    const s = String(code || '').trim().toLowerCase();
+    return s === 'hero_player' || s.endsWith('/hero_player');
+  };
+
+  try {
+    // Primary: captured display event store
+    const store = Array.isArray(window.__pbjsBidEventsDisplay)
+      ? window.__pbjsBidEventsDisplay : [];
+    out.has_display_store = true;
+    for (let i = 0; i < store.length; i++) {
+      if ((store[i] || {}).type === 'bidRequested') out.display_bidrequested_events += 1;
+    }
+
+    // Fallback: pbjs.getEvents() — Prebid's own internal event log (timing-safe)
+    if (!out.display_bidrequested_events && typeof pbjs.getEvents === 'function') {
+      const native = pbjs.getEvents() || [];
+      out.display_bidrequested_events = native.filter(e => {
+        if (!e || e.eventType !== 'bidRequested' || !e.args) return false;
+        const bids = Array.isArray(e.args.bids) ? e.args.bids : [];
+        return !bids.some(b => isHeroCode((b || {}).adUnitCode));
+      }).length;
+    }
+  } catch (e) {}
 
   // ── Per-unit floors ───────────────────────────────────────────────────────────
   // Floors are configured per ad unit on adUnit.floors, not in the global config.

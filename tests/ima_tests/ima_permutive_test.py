@@ -14,8 +14,8 @@ Test conditions
 - The IMA VAST ad request must have fired and been captured from
   securepubads.g.doubleclick.net before the test timeout (8 s).
 
-What counts as PASS / FAIL / SKIPPED
---------------------------------------
+What counts as PASS / FAIL / ERROR / N/A
+------------------------------------------
 - PASSED:
     - "permutive" key absent from cust_params, OR
     - "permutive" present with at least one non-empty value.
@@ -43,8 +43,8 @@ class ImaPermutiveTest(ImaBaseTest):
 
     async def validate(self, result: TestResult) -> TestResult:
         if result.data.get("cust_params") is None:
-            result.state = TestState.SKIPPED
-            result.warnings.append("No IMA ad request captured — video player may not have fired.")
+            result.state = TestState.ERROR
+            result.errors.append(self._ima_chain_error)
             return result
 
         vals = result.data.get("permutive", [])

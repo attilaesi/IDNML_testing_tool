@@ -14,8 +14,8 @@ Test conditions
 - For article-like pageTypes, we expect a non-empty category2 when
   it is part of the taxonomy model.
 
-What counts as PASS / FAIL / SKIPPED
-------------------------------------
+What counts as PASS / FAIL / SKIPPED / N/A
+------------------------------------------
 - PASSED:
     - category2 has at least one non-empty value on article-like pages,
       or
@@ -24,8 +24,9 @@ What counts as PASS / FAIL / SKIPPED
 - FAILED:
     - category2 is present but all values are empty.
 - SKIPPED:
-    - GPT targeting not available or pageType is clearly non-article
-      (index/homepage).
+    - GPT targeting not available.
+- N/A:
+    - pageType is index or homepage — category2 is not expected on non-article pages.
 """
 
 from pathlib import Path
@@ -53,9 +54,9 @@ class GptCategory2Test(GptBaseTest):
         page_type = (page_type_vals[0].lower() if page_type_vals else "").strip()
 
         if page_type in {"index", "homepage"}:
-            result.state = TestState.SKIPPED
+            result.state = TestState.NOT_APPLICABLE
             result.warnings.append(
-                f"pageType '{page_type}' treated as non-article; skipping GptCategory2Test."
+                f"pageType '{page_type}' — category2 not expected on non-article pages."
             )
             return result
 

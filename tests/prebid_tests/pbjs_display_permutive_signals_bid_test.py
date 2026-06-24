@@ -16,13 +16,14 @@ Test conditions
 - window.pbjs must be present (otherwise skipped).
 - At least one required bidder must have made requests (otherwise skipped).
 
-What counts as PASS / FAIL / SKIP
------------------------------------
+What counts as PASS / FAIL / ERROR
+------------------------------------
 - PASSED: all required bidders that made requests have the expected Permutive signal paths
   present with non-empty values.
 - FAILED: a required bidder made requests but is missing one or more Permutive signal paths.
-- SKIPPED: window.pbjs missing, no bidder requests found, or none of the required bidders
-  made requests (e.g. non-display page).
+- FAILED: auction fired but none of the required Permutive-ecosystem bidders made requests.
+- ERROR:  window.pbjs not found on page — Prebid did not load.
+- ERROR:  Prebid loaded but no display bid requests captured — auction did not fire.
 """
 
 from pathlib import Path
@@ -85,7 +86,7 @@ class PbjsDisplayPermutiveSignalsBidTest(BaseTest):
     # --- Setup ---
 
     async def setup(self, page, url: str) -> bool:
-        return bool(await page.evaluate("() => !!window.pbjs"))
+        return True
 
     # --- Execute ---
 
@@ -117,21 +118,27 @@ class PbjsDisplayPermutiveSignalsBidTest(BaseTest):
         diag = result.data or {}
 
         if not diag.get("hasPbjs"):
-            result.state = TestState.SKIPPED
-            result.warnings.append("pbjs not present")
+            result.state = TestState.ERROR
+            result.errors.append("window.pbjs not found on page — Prebid did not load.")
             return result
 
         if diag.get("totalRequests", 0) == 0:
-            result.state = TestState.SKIPPED
-            result.warnings.append("No bidder requests found")
+            result.state = TestState.ERROR
+            result.errors.append(
+                "Prebid loaded but no display bid requests were captured — "
+                "display auction did not fire (check pbjs_display_auction_activity for root cause)."
+            )
             return result
 
         per_bidder = diag.get("perBidder", {}) or {}
 
-        # If none of the required bidders appear at all, skip (clearer than a wall of SKIPPED lines)
+        # Auction fired but required Permutive-ecosystem bidders made no requests — assertion failure.
         if not any((per_bidder.get(b) or {}).get("requestCount", 0) > 0 for b in self.REQUIRED_BIDDERS):
-            result.state = TestState.SKIPPED
-            result.warnings.append("No requests for required bidders: " + ", ".join(self.REQUIRED_BIDDERS))
+            result.state = TestState.FAILED
+            result.errors.append(
+                "Display auction fired but none of the required Permutive-ecosystem bidders made requests: "
+                + ", ".join(self.REQUIRED_BIDDERS)
+            )
             return result
 
         any_fail = False
@@ -195,7 +202,7 @@ class PbjsDisplayPermutiveSignalsBidTest(BaseTest):
 
         if any_fail:
             result.state = TestState.FAILED
-            result.errors.append("FAILED\n" + "\n".join(summary))
+            result.errors.append(" | ".join(s for s in summary if "FAIL" in s))
         else:
             result.state = TestState.PASSED
             result.warnings.append("PASSED\n" + "\n".join(summary))

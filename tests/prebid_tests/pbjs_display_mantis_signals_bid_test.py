@@ -16,12 +16,13 @@ Test conditions
     - mantis: entries matching <label>-<GREEN|AMBER|RED>
     - mantis_context: lowercase snake_case tokens
 
-What counts as PASS / FAIL / SKIP
------------------------------------
+What counts as PASS / FAIL / ERROR
+------------------------------------
 - PASSED: both site.ext.data.mantis and site.ext.data.mantis_context are present,
   non-empty arrays with correctly formatted entries for every bidder that made requests.
 - FAILED: either path is missing, wrong type, empty, or contains malformed entries.
-- SKIPPED: window.pbjs missing or no bidder requests found.
+- ERROR:  window.pbjs not found on page — Prebid did not load.
+- ERROR:  Prebid loaded but no display bid requests captured — auction did not fire.
 """
 
 from pathlib import Path
@@ -53,8 +54,7 @@ class PbjsDisplayMantisSignalsBidTest(BaseTest):
     # --- Setup ---
 
     async def setup(self, page, url: str) -> bool:
-        has_pbjs = await page.evaluate("() => !!window.pbjs")
-        return bool(has_pbjs)
+        return True
 
     # --- Execute ---
 
@@ -103,13 +103,16 @@ class PbjsDisplayMantisSignalsBidTest(BaseTest):
         diag = result.data or {}
 
         if not diag.get("hasPbjs"):
-            result.state = TestState.SKIPPED
-            result.warnings.append("pbjs not present")
+            result.state = TestState.ERROR
+            result.errors.append("window.pbjs not found on page — Prebid did not load.")
             return result
 
         if diag.get("totalRequests", 0) == 0:
-            result.state = TestState.SKIPPED
-            result.warnings.append("No bidder requests found")
+            result.state = TestState.ERROR
+            result.errors.append(
+                "Prebid loaded but no display bid requests were captured — "
+                "display auction did not fire (check pbjs_display_auction_activity for root cause)."
+            )
             return result
 
         per_bidder = diag.get("perBidder", {}) or {}

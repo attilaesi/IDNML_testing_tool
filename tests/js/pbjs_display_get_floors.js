@@ -26,18 +26,6 @@
     if (m && m[1]) out.locale = decodeURIComponent(m[1]).toUpperCase();
   } catch (e) {}
 
-  // ── Display event store ───────────────────────────────────────────────────────
-  try {
-    const store = Array.isArray(window.__pbjsBidEventsDisplay)
-      ? window.__pbjsBidEventsDisplay : null;
-    if (store) {
-      out.has_display_store = true;
-      for (let i = 0; i < store.length; i++) {
-        if ((store[i] || {}).type === 'bidRequested') out.display_bidrequested_events += 1;
-      }
-    }
-  } catch (e) {}
-
   // ── pbjs ──────────────────────────────────────────────────────────────────────
   const pbjs = window.pbjs;
   if (!pbjs) { out.errors.push('window.pbjs not defined'); return out; }
@@ -47,17 +35,47 @@
     out.module_present = pbjs.installedModules.includes('priceFloors');
   }
 
-  // ── Call bid.getFloor() on captured display bids ─────────────────────────────
-  // The event store holds live references — bid.getFloor is still callable.
-  // We test one bid per ad unit (first seen), using mediaType:'banner'.
+  const isHeroCode = (code) => {
+    const s = String(code || '').trim().toLowerCase();
+    return s === 'hero_player' || s.endsWith('/hero_player');
+  };
 
-  const store = Array.isArray(window.__pbjsBidEventsDisplay)
+  // ── Get display bidRequested events (with fallback) ──────────────────────────
+  let bidReqEvents = [];
+
+  // Primary: captured display event store
+  const capturedStore = Array.isArray(window.__pbjsBidEventsDisplay)
     ? window.__pbjsBidEventsDisplay : [];
+  const fromStore = capturedStore.filter(e => e && e.type === 'bidRequested' && e.args);
 
+  if (fromStore.length) {
+    bidReqEvents = fromStore;
+    out.has_display_store = true;
+    out.display_bidrequested_events = fromStore.length;
+  } else {
+    // Fallback: pbjs.getEvents() — Prebid's own internal event log (timing-safe)
+    if (typeof pbjs.getEvents === 'function') {
+      try {
+        const native = pbjs.getEvents() || [];
+        const displayReqs = native.filter(e => {
+          if (!e || e.eventType !== 'bidRequested' || !e.args) return false;
+          const bids = Array.isArray(e.args.bids) ? e.args.bids : [];
+          return !bids.some(b => isHeroCode((b || {}).adUnitCode));
+        });
+        if (displayReqs.length) {
+          bidReqEvents = displayReqs.map(e => ({ type: 'bidRequested', args: e.args, stream: 'display', ts: 0 }));
+          out.has_display_store = true;
+          out.display_bidrequested_events = displayReqs.length;
+        }
+      } catch (_) {}
+    }
+  }
+
+  // ── Call bid.getFloor() on display bid objects ────────────────────────────────
   const tested = new Set();
 
-  for (let i = 0; i < store.length; i++) {
-    const ev = store[i] || {};
+  for (let i = 0; i < bidReqEvents.length; i++) {
+    const ev = bidReqEvents[i] || {};
     if (ev.type !== 'bidRequested') continue;
     const bids = ((ev.args || {}).bids) || [];
 
@@ -65,7 +83,6 @@
       const bid = bids[j];
       if (!bid || !bid.adUnitCode) continue;
 
-      // derive short code
       const parts = String(bid.adUnitCode).split('/');
       const short_code = (parts[parts.length - 1] || '').trim() || bid.adUnitCode;
 

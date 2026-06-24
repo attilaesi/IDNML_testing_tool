@@ -13,17 +13,19 @@ mismatches on UAT where URL heuristics return "independent" instead of "independ
 
 Test conditions
 ---------------
-- window.pbjs must be present (otherwise skipped).
+- window.pbjs must be present.
 - Supabase must be configured (otherwise skipped).
 - DISPLAY bidRequested events must have been captured.
 
-What counts as PASS / FAIL / SKIP
------------------------------------
+What counts as PASS / FAIL / ERROR / SKIP
+------------------------------------------
 - PASSED: seen display bidders exactly match the expected set (no missing, no unexpected).
 - FAILED: Supabase returns 0 rows for the explicit context (configuration/mapping error).
 - FAILED: expected bidders are present in DB but missing from the observed auction.
 - FAILED: bidders observed in the auction that are not in the expected set.
-- SKIPPED: window.pbjs missing, Supabase not configured, or no bidRequested events captured (no-bid round).
+- ERROR: window.pbjs not found on page — Prebid did not load.
+- ERROR: Prebid loaded but no DISPLAY bid requests captured — auction did not fire.
+- SKIPPED: Supabase not configured.
 """
 
 from pathlib import Path
@@ -146,8 +148,8 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         diag: Dict[str, Any] = result.data or {}
 
         if not diag.get("hasPbjs"):
-            result.state = TestState.SKIPPED
-            result.warnings.append("window.pbjs not present; cannot run PbjsDisplayBidderPresenceTest.")
+            result.state = TestState.ERROR
+            result.errors.append("window.pbjs not found on page — Prebid did not load.")
             return result
 
         locale = (diag.get("locale") or "UK").strip().upper()
@@ -164,8 +166,11 @@ class PbjsDisplayBidderPresenceTest(BaseTest):
         geo = locale.lower()
 
         if int(diag.get("bidRequestedEvents") or 0) == 0:
-            result.state = TestState.SKIPPED
-            result.warnings.append("No DISPLAY bidRequested events captured — no-bid round; skipping bidder presence check.")
+            result.state = TestState.ERROR
+            result.errors.append(
+                "Prebid loaded but no DISPLAY bid requests were captured — "
+                "display auction did not fire (check pbjs_display_auction_activity for root cause)."
+            )
             return result
 
         seen: Set[str] = set(diag.get("biddersFromRequests") or [])

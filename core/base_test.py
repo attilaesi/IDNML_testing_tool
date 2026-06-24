@@ -16,6 +16,7 @@ class TestState(Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     ERROR = "error"
+    NOT_APPLICABLE = "not_applicable"
 
 class TestResult:
     def __init__(self, test_name: str):
@@ -98,7 +99,11 @@ class BaseTest(ABC):
             result.state = TestState.RUNNING
             
             # Setup phase
-            if not await self.setup(page, url):
+            setup_result = await self.setup(page, url)
+            if setup_result is None:
+                result.state = TestState.NOT_APPLICABLE
+                return result
+            if not setup_result:
                 result.state = TestState.SKIPPED
                 return result
             
@@ -124,15 +129,17 @@ class BaseTest(ABC):
 class VideoOnlyTest(BaseTest):
     """
     Base class for tests that only run on video pages.
+    Returns NOT_APPLICABLE (not SKIPPED) when the page is not a video page or geo is US —
+    these are structural exclusions, not infrastructure failures.
     Subclasses do NOT need to check pageType themselves — setup() handles it.
     Override _video_setup() for any additional setup after the page-type check.
     """
 
     async def setup(self, page, url: str) -> bool:
         if (self.config.get("geo") or "").strip().lower() == "us":
-            return False
+            return None
         if not await self._is_video_page(page):
-            return False
+            return None
         return await self._video_setup(page, url)
 
     async def _video_setup(self, page, url: str) -> bool:

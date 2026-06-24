@@ -202,7 +202,6 @@ class BrowserManager:
                 // ------------------------------------------------------------
                 // Prebid event stores
                 // ------------------------------------------------------------
-                window.__pbjsBidEvents = window.__pbjsBidEvents || [];                 // legacy: combined
                 window.__pbjsBidEventsDisplay = window.__pbjsBidEventsDisplay || [];   // display stream (everything NOT hero_player)
                 window.__pbjsBidEventsVideo = window.__pbjsBidEventsVideo || [];       // hero_player stream only
 
@@ -286,10 +285,6 @@ class BrowserManager:
 
                 const pushEvent = (ev) => {
                   try {
-                    // Legacy combined store (keep existing tests working)
-                    window.__pbjsBidEvents.push(ev);
-
-                    // Split store
                     if (ev.stream === "video") {
                       window.__pbjsBidEventsVideo.push(ev);
                       window.__pbjsBidEventStoresMeta.videoCount += 1;

@@ -1,4 +1,9 @@
 # config/site_urls.py
+#
+# One URL per pagetype per profile.
+# Pagetype keys must be meaningful labels — the framework also detects the real
+# GPT pageType at runtime, so these are the *intended* page for each slot.
+# Use None to skip a pagetype for a profile (no URL will be visited for it).
 
 SITE_PROFILES = {
     # -------------------------
@@ -6,13 +11,12 @@ SITE_PROFILES = {
     # -------------------------
     "independent": {
         "site_url": "https://www.independent.co.uk",
-        "urls": [
-            "https://www.independent.co.uk/sport/winter-olympics/lindsey-vonn-winter-olympics-crans-montana-crash-b2910786.html",
-            "https://www.independent.co.uk/news/uk/home-news/london-bus-theft-mark-hehir-b2910974.html?test_group=lighteradlayout",
-            "https://www.independent.co.uk/climate-change/news/shark-teeth-ocean-acidification-co2-b2814061.html",
-            "https://www.independent.co.uk/news/uk/home-news/food-hunger-crisis-britain-trussell-report-poverty-b2822926.html",
-            "https://www.independent.co.uk/news/uk/politics/john-healey-resigns-defence-secretary-spending-plan-latest-news-b2993909.html"
-        ],
+        "urls": {
+            "article":  "https://www.independent.co.uk/news/uk/home-news/major-oak-dead-robin-hood-b2998094.html",
+            "liveblog": "https://www.independent.co.uk/news/world/middle-east/iran-us-war-live-trump-peace-deal-strait-of-hormuz-oil-b2998073.html",
+            "index":    "https://www.independent.co.uk/sport",
+            "video":    "https://www.independent.co.uk/news/uk/home-news/oxfordshire-council-england-flags-union-jack-b2998139.html",  # add a video article URL when available
+        },
     },
 
     # -------------------------
@@ -20,13 +24,12 @@ SITE_PROFILES = {
     # -------------------------
     "independent_uat": {
         "site_url": "https://uat-web.independent.co.uk",
-        "urls": [
-            "https://uat-web.independent.co.uk/sport/football/belarus-scotland-live-stream-score-result-world-cup-qualifier-b2822194.html",
-            "https://uat-web.independent.co.uk/news/uk/home-news/golden-eagle-england-rsbp-b2809376.html",
-            "https://uat-web.independent.co.uk/climate-change/news/shark-teeth-ocean-acidification-co2-b2814061.html",
-            "https://uat-web.independent.co.uk/news/uk/home-news/food-hunger-crisis-britain-trussell-report-poverty-b2822926.html",
-            "https://uat-web.independent.co.uk/arts-entertainment/tv/reviews/the-paper-show-review-office-spinoff-tim-key-domhnall-gleeson-b2819773.html"
-        ],
+        "urls": {
+            "article":  "https://uat-web.independent.co.uk/news/born-with-teeth-ncuti-gatwa-wyndhams-review-b2823743.html",
+            "liveblog": "https://uat-web.independent.co.uk/sport/football/belarus-scotland-live-stream-score-result-world-cup-qualifier-b2822194.html",
+            "index":    "https://uat-web.independent.co.uk/sport",
+            "video":    "https://uat-web.independent.co.uk/arts-entertainment/tv/reviews/the-paper-show-review-office-spinoff-tim-key-domhnall-gleeson-b2819773.html",
+        },
     },
 
     # -------------------------
@@ -34,13 +37,12 @@ SITE_PROFILES = {
     # -------------------------
     "independent_staging": {
         "site_url": "https://staging-web.independent.co.uk",
-        "urls": [
-            "https://staging-web.independent.co.uk/life-style/fashion",
-            "https://staging-web.independent.co.uk/life-style/fashion/asymmetric-hem-fashion-trend-2025-b2807532.html",
-            "https://staging-web.independent.co.uk/life-style/fashion/topshop-cara-delevingne-sadiq-khan-adwoa-aboah-london-b2808903.html",
-            "https://staging-web.independent.co.uk/sport/football/belarus-scotland-live-stream-score-result-world-cup-qualifier-b2822194.html",
-            "https://staging-web.independent.co.uk/tv/lifestyle/summer-holiday-escapes-b2787278.html",
-        ],
+        "urls": {
+            "article":  "https://staging-web.independent.co.uk/life-style/fashion/asymmetric-hem-fashion-trend-2025-b2807532.html",
+            "liveblog": "https://staging-web.independent.co.uk/sport/football/belarus-scotland-live-stream-score-result-world-cup-qualifier-b2822194.html",
+            "index":    "https://staging-web.independent.co.uk/news/",
+            "video":    None,
+        },
     },
 
     # -------------------------
@@ -48,31 +50,41 @@ SITE_PROFILES = {
     # -------------------------
     "standard": {
         "site_url": "https://www.standard.co.uk",
-        "urls": [
-            "https://www.standard.co.uk/news/london/kingston-ancient-market-revival-b1276991.html",
-            "https://www.standard.co.uk/showbiz/holly-ramsay-adam-peaty-feud-mother-gordon-b1257683.html",
-            "https://www.standard.co.uk/news/london/crazy-golf-wall-boy-dies-b1257766.html",
-            "https://www.standard.co.uk/lifestyle/celebrity/brad-pitt-ines-de-ramon-relationship-b1257724.html",
-            "https://www.standard.co.uk/culture/tvfilm/waitrose-christmas-advert-2025-review-keira-knightley-b1257610.html",
-        ],
+        "urls": {
+            "article":  "https://www.standard.co.uk/news/london/kingston-ancient-market-revival-b1276991.html",
+            "liveblog": None,
+            "index":    "https://www.standard.co.uk/news/",
+            "video":    None,
+        },
     },
 
-    # Optional placeholders (enable when you have URLs)
     "standard_uat": {
         "site_url": "https://uat-web.standard.co.uk",
-        "urls": [],
+        "urls": {
+            "article":  None,
+            "liveblog": None,
+            "index":    None,
+            "video":    None,
+        },
     },
+
     "standard_staging": {
         "site_url": "https://staging-web.standard.co.uk",
-        "urls": [],
+        "urls": {
+            "article":  None,
+            "liveblog": None,
+            "index":    None,
+            "video":    None,
+        },
     },
+
     "standard_dev_master": {
         "site_url": "https://standard-web-dev.brightsites.co.uk/",
-        "urls": [
-        "https://standard-web-dev.brightsites.co.uk/news/london/homeless-man-battered-woman-mallet-pleads-guilty-b1244683.html",
-        "https://standard-web-dev.brightsites.co.uk/showbiz/emmerdale-mack-boyd-death-scene-ofcom-complaints-b1244730.html",
-        "https://standard-web-dev.brightsites.co.uk/sport/football/transfer-news-live-arsenal-fc-chelsea-liverpool-man-utd-hincapie-garnacho-isak-b1244334.html",
-        "https://standard-web-dev.brightsites.co.uk/news/seven-athome-beauty-gadgets-that-are-really-worth-investing-in-b1244864.html",
-        ],
+        "urls": {
+            "article":  "https://standard-web-dev.brightsites.co.uk/news/london/homeless-man-battered-woman-mallet-pleads-guilty-b1244683.html",
+            "liveblog": None,
+            "index":    "https://standard-web-dev.brightsites.co.uk/news/",
+            "video":    None,
+        },
     },
 }

@@ -13,14 +13,32 @@
     }
   };
 
-  const events = Array.isArray(w.__pbjsBidEvents)
-    ? w.__pbjsBidEvents
+  const isHeroCode = (code) => {
+    const s = String(code || '').trim().toLowerCase();
+    return s === 'hero_player' || s.endsWith('/hero_player');
+  };
+
+  // Primary: captured display event store
+  let events = Array.isArray(w.__pbjsBidEventsDisplay)
+    ? w.__pbjsBidEventsDisplay.filter(e => e && e.type === "bidRequested" && e.args)
     : [];
 
+  // Fallback: pbjs.getEvents() — Prebid's own internal event log (timing-safe)
+  if (!events.length && w.pbjs && typeof w.pbjs.getEvents === "function") {
+    try {
+      const native = w.pbjs.getEvents() || [];
+      events = native
+        .filter(e => {
+          if (!e || e.eventType !== "bidRequested" || !e.args) return false;
+          const bids = Array.isArray(e.args.bids) ? e.args.bids : [];
+          return !bids.some(b => isHeroCode((b || {}).adUnitCode));
+        })
+        .map(e => ({ type: "bidRequested", args: e.args, stream: "display", ts: 0 }));
+    } catch (_) {}
+  }
+
   diag.debug.eventsLen = events.length;
-  diag.debug.eventTypes = Array.from(
-    new Set(events.map(e => e && e.type).filter(Boolean))
-  );
+  diag.debug.eventTypes = ["bidRequested"];
 
   diag.debug.rawEventsSample = events.slice(0, 3).map(e => ({
     type: e && e.type,

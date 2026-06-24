@@ -85,6 +85,10 @@ def discover_tests() -> Tuple[Dict[str, Type[BaseTest]], Dict[str, List[str]]]:
 
         test_categories.setdefault(category, [])
 
+        # Skip quarantined modules entirely
+        if getattr(test_module, "QUARANTINE", False):
+            continue
+
         # Collect concrete subclasses defined in this module
         for name, obj in inspect.getmembers(test_module, inspect.isclass):
             if obj.__module__ != module_name:

@@ -218,7 +218,7 @@ What geo controls end-to-end:
 |---|---|
 | BrowserStack | Sets `browserstack.geoLocation` so the session IP matches the geo (`uk` → GB, `us` → US) |
 | CMP handler | Skipped entirely for US (no consent banner shown in the US) |
-| Video tests | All `VideoOnlyTest` subclasses are skipped for US geo (different video player; no Prebid video auction in the US) |
+| Video tests | All `VideoOnlyTest` subclasses return **N/A** for US geo (different video player; no Prebid video auction in the US) |
 | Readiness waiter | Does not wait for hero_player auction on video pages when geo is US |
 | `context_summary.geo` | Explicitly set from config rather than inferred from the page Locale cookie |
 | Supabase rows | Every result row is tagged with the geo; regression diffs are scoped per geo (UK runs only compare against previous UK runs) |
@@ -409,7 +409,7 @@ The sheet title includes the site and geo so you can tell runs apart at a glance
 | **regression** | New failures · known failures · fixed tests vs. the previous run for the same geo (only present when `--regression` is passed) |
 | **appendix** | Description, conditions, and pass/fail criteria for every test (from module docstrings) |
 
-Colour key: green = PASS · red = FAIL · dark red = ERROR · amber = MIXED · grey = SKIP
+Colour key: green = PASS · red = FAIL · dark red = ERROR · amber = MIXED · grey = SKIP · light grey = N/A (test not applicable to this page type or geo)
 
 ### Authentication (OAuth — recommended)
 
@@ -541,7 +541,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
 - **Basic auth** — Pre-prod credentials are passed via Playwright `http_credentials`, not via URL injection (which breaks `History.replaceState` and `fetch` on some pages).
 - **CMP** — Consent is handled once per session on the first URL; subsequent pages inherit the accepted consent from the shared browser context. Skipped entirely for US geo (no consent banner shown in the US).
 - **Geo** — Passed via `--geo uk|us`. Controls the BrowserStack IP location, skips CMP and video Prebid tests for US, stamps every Supabase result row, and scopes regression diffs per geo. When set, takes precedence over the page's `Locale` cookie for `context_summary.geo`.
-- **Video tests** — All `VideoOnlyTest` subclasses (e.g. `pbjs_video_bidder_presence_test`) are skipped for US geo. The US uses a different video player with no Prebid auction for `hero_player`. The readiness waiter also skips waiting for the hero auction on video pages in US geo.
+- **Video tests** — All `VideoOnlyTest` subclasses (e.g. `pbjs_video_bidder_presence_test`) return **N/A** for US geo and on non-video pages. The US uses a different video player with no Prebid auction for `hero_player`. The readiness waiter also skips waiting for the hero auction on video pages in US geo.
+- **N/A vs SKIP vs ERROR** — `N/A` means the test is structurally not applicable to this page type or geo (e.g. article-ID test on an index page, video test on US geo). `SKIP` means the test could not run due to a missing infrastructure dependency (e.g. Supabase not configured). `ERROR` means the test's prerequisite chain broke at runtime (e.g. JW Player didn't load, Prebid auction didn't fire) — this always indicates a real problem. `FAIL` is reserved for tests that completed their prerequisite chain but whose final assertion failed (e.g. wrong bidder set, missing signal). Only `N/A` is expected and excluded from failure counts.
 - **Warmup** — Configurable warmup phase loads N pages before testing starts to prime the browser context and consent state.
 - **Parallel mode** — URLs can be tested in parallel using a bounded semaphore (`concurrency` in config). Each parallel worker gets its own page within the shared browser context. Each worker has a hard timeout (nav + readiness + 120s buffer) so a stale or dropped BrowserStack session cannot hang the run indefinitely.
 - **Test discovery** — `core/framework/discovery.py` auto-discovers all `BaseTest` subclasses from the `tests/` directory. No registration required; adding a new file is enough.

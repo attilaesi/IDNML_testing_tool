@@ -31,8 +31,14 @@ class ImaBaseTest(VideoOnlyTest):
 
     _IMA_TIMEOUT = 25.0
     _IMA_POLL_INTERVAL = 0.2
+    # Set by _fetch_cust_params() when the prerequisite chain broke; used by subclass validate().
+    _ima_chain_error: str = "No IMA ad request captured."
 
     async def _video_setup(self, page, url: str) -> bool:
+        # Bail immediately if the framework already determined no player exists.
+        if await page.evaluate("!!(window.__imaPlayerAbsent)"):
+            return True
+
         # The runner (framework_manager) registered the primary IMA listener and
         # clicked the play button before any tests started. IMA tests block here
         # until window.__imaAdRequest is set — display tests never call this and
@@ -43,14 +49,13 @@ class ImaBaseTest(VideoOnlyTest):
                 return True
             await asyncio.sleep(self._IMA_POLL_INTERVAL)
 
-        # Timeout — IMA request never fired. Return True so execute() can still
-        # read None from window.__imaAdRequest and produce a SKIPPED result.
         return True
 
     async def _fetch_cust_params(self, page) -> Optional[Dict[str, str]]:
         """
-        Read window.__imaAdRequest. By the time this is called, _video_setup has
-        already waited for it — so this is a single read, no polling needed.
+        Read window.__imaAdRequest. Sets self._ima_chain_error with a chain-specific
+        diagnosis when no request was captured, so validate() can report exactly
+        where in the video → player → IMA chain the failure occurred.
         """
         data = await page.evaluate("window.__imaAdRequest || null")
         if data:
@@ -58,8 +63,29 @@ class ImaBaseTest(VideoOnlyTest):
             if self.config.get("trace"):
                 print(f"[{self.name}] IMA cust_params captured: {cust_params}")
             return cust_params
+
+        # Walk the chain to find where it broke.
+        try:
+            if await page.evaluate("!!(window.__imaPlayerAbsent)"):
+                self._ima_chain_error = (
+                    "JW Player did not appear in DOM — "
+                    "video page has no active autoplay player or player took too long to load"
+                )
+            elif await page.evaluate("!!(window.__imaVideoSetupDone)"):
+                self._ima_chain_error = (
+                    "JW Player loaded and play was triggered but no IMA VAST request was captured — "
+                    "ad break did not fire or was blocked by the player"
+                )
+            else:
+                self._ima_chain_error = (
+                    "No IMA ad request captured — "
+                    "player setup did not complete (check framework logs for video setup details)"
+                )
+        except Exception:
+            self._ima_chain_error = "No IMA ad request captured."
+
         if self.config.get("trace"):
-            print(f"[{self.name}] IMA cust_params not captured after {self._IMA_TIMEOUT}s")
+            print(f"[{self.name}] IMA fail reason: {self._ima_chain_error}")
         return None
 
     def _targeting(self, cust_params: Dict[str, str], key: str) -> List[str]:

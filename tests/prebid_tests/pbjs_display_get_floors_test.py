@@ -13,13 +13,14 @@ Test conditions
 - At least one DISPLAY bidRequested event must have been captured.
 - Supabase must be configured for the DB comparison step.
 
-What counts as PASS / FAIL / SKIP
------------------------------------
+What counts as PASS / FAIL / ERROR
+------------------------------------
 - PASSED:  bid.getFloor() works on all units and all values match the DB.
 - FAILED:  bid.getFloor is not a function on any bid (module not active).
 - FAILED:  getFloor() throws or returns no floor for one or more units.
 - FAILED:  getFloor() returns a value that doesn't match the DB for a unit.
-- SKIPPED: window.pbjs missing or no display bidRequested events captured.
+- ERROR:   window.pbjs not found on page — Prebid did not load.
+- ERROR:   Prebid loaded but no DISPLAY bid requests captured — auction did not fire.
 """
 
 from pathlib import Path
@@ -105,14 +106,15 @@ class PbjsDisplayGetFloorsTest(BaseTest):
         diag: Dict[str, Any] = result.data or {}
 
         if not diag.get("hasPbjs"):
-            result.state = TestState.SKIPPED
-            result.warnings.append("window.pbjs not present.")
+            result.state = TestState.ERROR
+            result.errors.append("window.pbjs not found on page — Prebid did not load.")
             return result
 
         if not diag.get("has_display_store") or not diag.get("display_bidrequested_events"):
-            result.state = TestState.SKIPPED
-            result.warnings.append(
-                "No DISPLAY bidRequested events observed — cannot test bid.getFloor()."
+            result.state = TestState.ERROR
+            result.errors.append(
+                "Prebid loaded but no DISPLAY bid requests were observed — "
+                "display auction did not fire (check pbjs_display_auction_activity for root cause)."
             )
             return result
 
