@@ -516,9 +516,11 @@ class SheetsWriter:
         regression_ws = None
         if regression is not None:
             try:
-                regression_ws = spreadsheet.add_worksheet(title="regression", rows=200, cols=6)
+                regression_ws = spreadsheet.add_worksheet(title="regression", rows=300, cols=15)
                 self._write_regression_tab(
                     regression_ws, regression,
+                    all_results=all_results,
+                    device_keys=device_keys,
                     appendix_gid=appendix_gid,
                     appendix_row_map=appendix_row_map,
                 )
@@ -988,6 +990,8 @@ class SheetsWriter:
         self,
         ws,
         regression: dict,
+        all_results: Optional[List[TestResult]] = None,
+        device_keys: Optional[List[str]] = None,
         appendix_gid: int = 0,
         appendix_row_map: Optional[Dict[str, int]] = None,
     ) -> None:
@@ -1104,10 +1108,89 @@ class SheetsWriter:
         known  = regression.get("known_failures", [])
         fixed  = regression.get("fixed", [])
 
-        _subsection("NEWLY ADDED TESTS", newly_added, "new",   include_error=True, include_status=True)
-        _subsection("NEW FAILURES",      new_f,       "fail",  include_error=True)
-        _subsection("KNOWN FAILURES",    known,       "mixed", include_error=True)
-        _subsection("FIXED",             fixed,       "pass",  include_error=False)
+        _subsection("NEWLY ADDED TESTS", newly_added, "new",  include_error=True, include_status=True)
+        _subsection("NEW FAILURES",      new_f,       "fail", include_error=True)
+        _subsection("FIXED",             fixed,       "pass", include_error=False)
+
+        # ── KNOWN FAILING TESTS — test × page-type matrix per device ─────────
+        unique_known_tests = _sort_by_component(list({e["test_name"] for e in known if e.get("test_name")}))
+        n_unique = len(unique_known_tests)
+
+        data.append([])
+        r = row()
+        data.append([f"KNOWN FAILING TESTS  ({n_unique})"])
+        fmt(r, 1, r, REG_COLS, CellFormat(
+            backgroundColor=_c("mixed"),
+            textFormat=TextFormat(bold=True),
+        ))
+
+        if not known:
+            data.append(["—"])
+        else:
+            # Build (test_name, device, page_type) → TestState from the current run results
+            result_lkp: Dict[Tuple[str, str, str], TestState] = {}
+            if all_results:
+                for _r in all_results:
+                    _pt = _pagetype_from_result(_r)
+                    if _r.test_name and _r.device:
+                        result_lkp[(_r.test_name, _r.device, _pt)] = _r.state
+
+            page_types = _collect_pagetypes(all_results) if all_results else []
+            n_pt = len(page_types)
+
+            # Devices in known failures, respecting device_keys order
+            known_dev_set = {e.get("device") for e in known if e.get("device")}
+            ordered_devs = [dk for dk in (device_keys or []) if dk in known_dev_set]
+            ordered_devs += sorted(known_dev_set - set(ordered_devs))
+
+            for dk in ordered_devs:
+                data.append([])
+                r = row()
+                data.append([dk.replace("_", " ").upper()])
+                fmt(r, 1, r, max(REG_COLS, 1 + n_pt), CellFormat(
+                    backgroundColor=_c("dash"),
+                    textFormat=TextFormat(bold=True),
+                ))
+
+                # Column headers
+                r = row()
+                pt_labels = [_PAGETYPE_LABEL.get(pt, pt) for pt in page_types] if page_types else ["Detail"]
+                data.append(["Test"] + pt_labels)
+                fmt(r, 1, r, 1 + len(pt_labels), CellFormat(
+                    backgroundColor=_c("header_md"),
+                    textFormat=TextFormat(bold=True, foregroundColor=_c("white")),
+                ))
+
+                for test_name in unique_known_tests:
+                    cur = row()
+                    if page_types:
+                        row_data: List = [_test_name_cell(test_name)]
+                        for pt in page_types:
+                            state = result_lkp.get((test_name, dk, pt))
+                            if state is None:
+                                row_data.append("—")
+                            elif state == TestState.FAILED:
+                                row_data.append("FAIL")
+                            elif state == TestState.ERROR:
+                                row_data.append("ERR")
+                            elif state == TestState.PASSED:
+                                row_data.append("✓")
+                            else:
+                                row_data.append("–")
+                        data.append(row_data)
+                        for ci, pt in enumerate(page_types):
+                            state = result_lkp.get((test_name, dk, pt))
+                            col = 2 + ci
+                            if state == TestState.FAILED:
+                                fmt(cur, col, cur, col, CellFormat(backgroundColor=_c("fail")))
+                            elif state == TestState.ERROR:
+                                fmt(cur, col, cur, col, CellFormat(backgroundColor=_c("error")))
+                            elif state == TestState.PASSED:
+                                fmt(cur, col, cur, col, CellFormat(backgroundColor=_c("pass")))
+                    else:
+                        # Fallback: no all_results — show error_summary from regression data
+                        match = next((e for e in known if e.get("test_name") == test_name and e.get("device") == dk), None)
+                        data.append([_test_name_cell(test_name), (match or {}).get("error_summary") or ""])
 
         total_rows = row() - 1
         fmt(1, 1, total_rows, REG_COLS, CellFormat(wrapStrategy="WRAP", verticalAlignment="TOP"))
@@ -1117,7 +1200,7 @@ class SheetsWriter:
             format_cell_ranges(ws, fmts)
         set_frozen(ws, rows=1, cols=0)
 
-        self._set_column_widths(ws, {0: 220, 1: 130, 2: 350})
+        self._set_column_widths(ws, {0: 220, 1: 110, 2: 110, 3: 110, 4: 110, 5: 280})
 
     # ── Appendix tab ──────────────────────────────────────────────────────────
 
