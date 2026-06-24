@@ -4,20 +4,20 @@ prebid: PbjsDisplayPubcidPresenceTest
 What this test checks
 ---------------------
 Validates that PubCommonId (pubcid) is present in every display bidder's requests.
-Inspects bids in window.__pbjsBidEventsDisplay for userId.pubCommonId or a matching
-userIdAsEids entry (source hints pubcommon / pubcid).
+Inspects bids in window.__pbjsBidEventsDisplay (with pbjs.getEvents() fallback) for
+userId.pubCommonId or a matching userIdAsEids entry (source hints pubcommon / pubcid).
 
 Test conditions
 ---------------
-- window.pbjs must be present (otherwise skipped).
+- window.pbjs must be present.
 - DISPLAY bidRequested events must have been captured.
 
-What counts as PASS / FAIL / SKIP
------------------------------------
+What counts as PASS / FAIL / ERROR
+------------------------------------
 - PASSED: every display bidder has pubcid in at least one of its bids.
-- FAILED: pbjs present but no DISPLAY bidRequested events captured.
 - FAILED: at least one display bidder is missing pubcid across all of its bids.
-- SKIPPED: window.pbjs not present, or no DISPLAY bidRequested events captured (no-bid round).
+- ERROR: window.pbjs not found on page — Prebid did not load.
+- ERROR: Prebid loaded but no DISPLAY bid requests captured — auction did not fire.
 """
 from pathlib import Path
 from core.base_test import BaseTest, TestResult, TestState
@@ -76,13 +76,16 @@ class PbjsDisplayPubcidPresenceTest(BaseTest):
         }
 
         if not data.get("hasPbjs"):
-            result.state = TestState.SKIPPED
-            result.errors.append("window.pbjs not found; cannot validate pubcid in display bids.")
+            result.state = TestState.ERROR
+            result.errors.append("window.pbjs not found on page — Prebid did not load.")
             return result
 
         if int(data.get("bidRequestedEvents") or 0) == 0:
-            result.state = TestState.SKIPPED
-            result.warnings.append("No DISPLAY bidRequested events captured — no-bid round; skipping pubcid check.")
+            result.state = TestState.ERROR
+            result.errors.append(
+                "Prebid loaded but no DISPLAY bid requests were captured — "
+                "display auction did not fire (check pbjs_display_auction_activity for root cause)."
+            )
             return result
 
         missing = data.get("biddersMissingPubcid") or []
